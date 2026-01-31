@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: nlsql-postgres
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: readonly_user
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_ROOT_PASSWORD: root_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U readonly_user -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nlsql-network
+
+  # Ollama AI Service (for SQL generation)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nlsql-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - nlsql-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: Redis for caching (future enhancement)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: nlsql-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - nlsql-network
+
+volumes:
+  postgres_data:
+    driver: local
+  ollama_data:
+    driver: local
+  # redis_data:
+  #   driver: local
+
+networks:
+  nlsql-network:
+    driver: bridge
