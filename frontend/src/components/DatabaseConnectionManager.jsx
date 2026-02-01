@@ -59,7 +59,7 @@ export default function DatabaseConnectionManager() {
       const response = await axios.get('/api/v1/databases')
       setDatabases(response.data.databases)
     } catch (error) {
-      console.error('Failed to load databases:', error)
+      // Silent fail - will show empty state
     } finally {
       setLoading(false)
     }
@@ -112,7 +112,6 @@ export default function DatabaseConnectionManager() {
         setIsNewConnection(false)
       }
     } catch (error) {
-      console.error('Failed to remove database:', error)
       alert('Failed to remove database')
     }
   }

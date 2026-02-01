@@ -5,37 +5,56 @@
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL--3.0-yellow.svg)](LICENSE)
 
-## 📋 Project Overview
+## Project Overview
 
 A production-ready Natural Language to SQL Query Engine that allows users to query databases conversationally without knowing SQL. Built with FastAPI, React, and Docker Ollama for completely local, private AI-powered SQL generation.
 
-**Key Features:**
-- 🤖 **Local AI** - Uses Docker Ollama (llama3.2) - completely free, no API keys needed
-- 🗄️ **Multi-Database Support** - PostgreSQL and MySQL with persistent connections
-- 🔒 **Security** - SQL injection prevention, query validation, configurable write mode
-- 📊 **Smart Context** - Includes table schema AND sample data for accurate query generation
-- ⚡ **Async Architecture** - Connection pooling, transaction support, auto-commit
-- 🌐 **Modern UI** - React + Vite frontend with query history and database management
-- 🐳 **Docker Ready** - Complete Docker Compose setup for all services
+### Key Features
 
-## 🏗️ Architecture
+- **Local AI** - Uses Docker Ollama (llama3.2) - completely free, no API keys needed
+- **Multi-Database Support** - PostgreSQL and MySQL with persistent connections
+- **Security** - SQL injection prevention, query validation, configurable write mode
+- **Smart Context** - Includes table schema AND sample data for accurate query generation
+- **Async Architecture** - Connection pooling, transaction support, auto-commit
+- **Modern UI** - React + Vite frontend with query history and database management
+- **Docker Ready** - Complete Docker Compose setup for all services
+
+## Architecture
 
 ```
 User Question → Frontend (React) → Backend (FastAPI) → Schema Inspector → Ollama AI → SQL Generator → Query Validator → Query Executor → PostgreSQL/MySQL
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
-### One Command to Start Everything
+### First Time Setup
+
+Run the installation script to automatically detect your system and install dependencies:
 
 ```bash
-./run.sh
+./install.sh
 ```
 
-That's it! This single command will:
-1. Auto-setup Docker Ollama with llama3.2 (if not already running)
+This script will:
+1. Detect your OS (macOS/Linux/Windows) and architecture (x86_64/ARM64)
+2. Check for required tools (Docker, Python 3.12+, Node.js 18+)
+3. Set up Python virtual environment
+4. Install all dependencies (Python + Node.js)
+5. Set up Docker Ollama with llama3.2 model
+6. Create .env configuration file
+
+### Start the Application
+
+After installation, start everything with one command:
+
+```bash
+./run.sh dev
+```
+
+This will:
+1. Start Docker Ollama with llama3.2 (if not already running)
 2. Start PostgreSQL database
 3. Start backend (FastAPI)
 4. Start frontend (React)
@@ -51,16 +70,23 @@ The application is now running with:
 
 ### Additional Commands
 
+**Installation (first time only):**
 ```bash
-./run.sh              # Start everything (auto-setup if needed)
-./run.sh --verbose    # Start with live logs
+./install.sh          # Auto-detect system and install dependencies
+```
+
+**Running the application:**
+```bash
+./run.sh dev          # Start development environment
+./run.sh dev --verbose # Start with live logs
+./run.sh prod         # Start production mode (backend only)
 ./run.sh stop         # Stop all services
 ./run.sh clean        # Clean up containers, logs, cache
 ./run.sh logs         # View application logs
 ./run.sh help         # Show all commands
 ```
 
-## 📦 What's Included
+## What's Included
 
 - **Backend (FastAPI)** - REST API with async PostgreSQL/MySQL support
 - **Frontend (React + Vite)** - Modern UI with query builder and history
@@ -68,7 +94,7 @@ The application is now running with:
 - **Database (PostgreSQL)** - Test database with sample data
 - **Docker Compose** - Complete orchestration for all services
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables (.env)
 
@@ -97,25 +123,26 @@ docker exec -it nlsql-ollama ollama pull codellama
 OLLAMA_MODEL=codellama
 
 # Restart app
-./run.sh stop && ./run.sh dev
+./run.sh stop && ./run.sh
 ```
 
-**Available Models:**
+### Available Models
+
 | Model | Size | Speed | Best For |
 |-------|------|-------|----------|
-| llama3.2 | 2GB | ⚡⚡⚡ | General SQL, fast |
-| codellama | 3.8GB | ⚡⚡ | Complex queries |
-| llama3.1 | 4.7GB | ⚡ | High accuracy |
-| mistral | 4.1GB | ⚡⚡ | Balanced |
+| llama3.2 | 2GB | Fast | General SQL queries |
+| codellama | 3.8GB | Medium | Complex queries |
+| llama3.1 | 4.7GB | Slow | High accuracy |
+| mistral | 4.1GB | Medium | Balanced performance |
 
-## 🎯 Usage Examples
+## Usage Examples
 
 ### Via UI (http://localhost:3000)
 
 1. **Connect to Database**
    - Go to "Databases" tab
    - Click "Add Database"
-   - Enter connection details (saved across restarts!)
+   - Enter connection details (saved across restarts)
 
 2. **Ask Natural Language Questions**
    ```
@@ -153,13 +180,13 @@ curl -X POST http://localhost:8000/api/v1/query/sql \
   }'
 ```
 
-## 🔒 Security Features
+## Security Features
 
 ### Write Operations
 - **Read-Only Mode** - Default safe mode, only SELECT queries
 - **Write Mode** - Enable DELETE, UPDATE, INSERT operations
 - **Auto-Commit** - All write operations commit automatically
-- **Transaction Support** - Automatic rollback on errors
+- **Error Handling** - Automatic transaction rollback on query errors
 
 ### SQL Protection
 - **Injection Prevention** - Blocks dangerous patterns
@@ -167,26 +194,46 @@ curl -X POST http://localhost:8000/api/v1/query/sql \
 - **Query Validation** - Syntax and safety checks
 - **Timeout Protection** - Prevents long-running queries
 
-## 📊 Sample Data Context
+### Security Warnings
+
+**Important Security Considerations:**
+
+- **HTTPS Required in Production** - Database credentials are transmitted in API requests. Always use HTTPS when deploying to production to protect sensitive data.
+
+- **Credential Storage** - Database connection credentials are stored in plaintext in `~/.nlsql/databases.json`. Protect this file:
+  ```bash
+  chmod 600 ~/.nlsql/databases.json
+  ```
+  Consider using encrypted file systems or secrets management in production.
+
+- **CORS Configuration** - Update `CORS_ORIGINS` environment variable for production domains. Never use `["*"]` in production - specify exact frontend URLs.
+
+- **Database Permissions** - Use database accounts with minimal required privileges. For read-only use cases, use read-only database users.
+
+- **Write Mode Caution** - Write mode enables UPDATE, DELETE, and INSERT operations. Always review generated SQL before execution in write mode. Changes are permanent once executed.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive security best practices.
+
+## Sample Data Context
 
 The AI sees actual row data from your tables, not just schema:
 
 **Without Sample Data:**
 ```
 Question: "delete alice brown"
-Generated: DELETE FROM users WHERE username = 'alice' AND role = 'brown' ❌
+Generated: DELETE FROM users WHERE username = 'alice' AND role = 'brown' (incorrect)
 ```
 
 **With Sample Data (Current):**
 ```
 Question: "delete alice brown"
 AI sees: username='alice_brown' in sample data
-Generated: DELETE FROM users WHERE username = 'alice_brown' ✓
+Generated: DELETE FROM users WHERE username = 'alice_brown' (correct)
 ```
 
 Sample data includes 3 rows per table by default, configurable in settings.
 
-## 🗄️ Database Persistence
+## Database Persistence
 
 Connected databases are automatically saved to `~/.nlsql/databases.json` and restored on restart.
 
@@ -198,7 +245,7 @@ cat ~/.nlsql/databases.json
 curl http://localhost:8000/api/v1/databases
 ```
 
-## 🐳 Docker Services
+## Docker Services
 
 ### View Running Services
 ```bash
@@ -228,7 +275,7 @@ docker logs nlsql-postgres
 docker exec -it nlsql-postgres psql -U readonly_user -d testdb
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 natural-lang-sql/
@@ -252,7 +299,29 @@ natural-lang-sql/
 └── README.md                    # This file
 ```
 
-## 🔧 Development
+## Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive deployment guides including:
+
+- Free deployment using Vercel + Render + Supabase ($0/month)
+- Oracle Cloud Always Free tier (forever free with full compute)
+- Production configuration and best practices
+
+### Quick Deploy Options
+
+**Frontend (Vercel):**
+```bash
+# Connect GitHub repo to Vercel
+# Auto-deploys on push to main branch
+```
+
+**Backend (Render):**
+```bash
+# Use render.yaml for one-click deploy
+# Connect GitHub repo to Render
+```
+
+## Development
 
 ### Manual Setup (Without Docker)
 
@@ -269,24 +338,20 @@ npm install
 npm run dev
 ```
 
-### Testing
+### Health Checks
 
 ```bash
-# Run backend tests
-pytest
-
-# Test database connection
+# Test backend health
 curl http://localhost:8000/api/v1/health
 
+# Test database connection
+curl http://localhost:8000/api/v1/health/database
+
 # Test Ollama
-curl http://localhost:11434/api/generate -d '{
-  "model": "llama3.2",
-  "prompt": "Generate SQL to select all users",
-  "stream": false
-}'
+curl http://localhost:11434/api/tags
 ```
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### Ollama Not Responding
 ```bash
@@ -321,35 +386,31 @@ lsof -ti:3000 | xargs kill -9
 ### Clean Start
 ```bash
 ./run.sh clean   # Remove all containers and cache
-./run.sh dev     # Fresh start
+./run.sh         # Fresh start
 ```
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome. Please:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
 4. Submit a pull request
 
-## 📝 License
+## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the GPL-3.0 License - see the LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Ollama** - Local AI model serving
 - **FastAPI** - Modern Python web framework
 - **React** - Frontend framework
 - **Docker** - Containerization platform
 
-## 📚 Related Documentation
+## Related Documentation
 
-- [FastAPI Docs](https://fastapi.tiangolo.com)
+- [FastAPI Documentation](https://fastapi.tiangolo.com)
 - [Ollama Documentation](https://github.com/ollama/ollama)
-- [React Docs](https://react.dev)
-- [Docker Compose](https://docs.docker.com/compose/)
-
----
-
-**Built with ❤️ for making databases accessible to everyone**
+- [React Documentation](https://react.dev)
+- [Docker Compose Documentation](https://docs.docker.com/compose/)

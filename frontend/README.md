@@ -4,14 +4,14 @@ Modern React frontend with Tailwind CSS for the Natural Language SQL Query Engin
 
 ## Features
 
-- 🔍 **Natural Language Query Interface** - Ask questions in plain English
-- 📊 **Results Display** - Beautiful table view of query results
-- 📋 **Schema Viewer** - Browse database tables and columns
-- 📜 **Query History** - View past queries and results
-- 🟢 **Database Status** - Real-time connection health monitoring
-- 🛡️ **Safety Indicators** - Read-only mode warnings
-- ⚡ **Fast & Responsive** - Built with React + Vite
-- 🎨 **Beautiful UI** - Tailwind CSS styling
+- **Natural Language Query Interface** - Ask questions in plain English
+- **Results Display** - Beautiful table view of query results
+- **Schema Viewer** - Browse database tables and columns
+- **Query History** - View past queries and results
+- **Database Status** - Real-time connection health monitoring
+- **Safety Indicators** - Read-only mode warnings
+- **Fast & Responsive** - Built with React + Vite
+- **Beautiful UI** - Tailwind CSS styling
 
 ## Quick Start
 
@@ -149,4 +149,4 @@ Edit `vite.config.js` proxy settings to change the backend URL.
 
 ---
 
-Built with ❤️ using React, Tailwind CSS, and FastAPI
+Built using React, Tailwind CSS, and FastAPI

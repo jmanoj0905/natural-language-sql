@@ -141,7 +141,7 @@ class WriteOperationHandler:
                 "user_impacts": user_impacts
             },
             "requires_batch_confirmation": True,
-            "message": f"⚠️ BATCH DELETE: {len(matches)} users, {total_records} total records",
+            "message": f"BATCH DELETE: {len(matches)} users, {total_records} total records",
             "safety_warning": "This will permanently delete multiple users and all their data."
         }
 

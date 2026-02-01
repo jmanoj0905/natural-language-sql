@@ -1,7 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
-import axios from 'axios'
-
-const API_BASE = '/api/v1'
+import { useState, useEffect } from 'react'
 
 export default function QueryInterface({
   onSubmit,
@@ -15,27 +12,6 @@ export default function QueryInterface({
   const [readOnlyMode, setReadOnlyMode] = useState(true)
   const [executeQuery, setExecuteQuery] = useState(true)
   const [generatedResult, setGeneratedResult] = useState(null)
-  const [lastWriteOperation, setLastWriteOperation] = useState(null)
-  const [rollbackTimeLeft, setRollbackTimeLeft] = useState(0)
-  const rollbackTimerRef = useRef(null)
-
-  // Countdown timer for rollback window
-  useEffect(() => {
-    if (rollbackTimeLeft > 0) {
-      rollbackTimerRef.current = setTimeout(() => {
-        setRollbackTimeLeft(rollbackTimeLeft - 1)
-      }, 1000)
-    } else if (rollbackTimeLeft === 0 && lastWriteOperation) {
-      // Time expired, clear the write operation
-      setLastWriteOperation(null)
-    }
-
-    return () => {
-      if (rollbackTimerRef.current) {
-        clearTimeout(rollbackTimerRef.current)
-      }
-    }
-  }, [rollbackTimeLeft, lastWriteOperation])
 
   // Detect dangerous SQL operations
   const detectDangerousSQL = (sql) => {
@@ -64,15 +40,6 @@ export default function QueryInterface({
     }
 
     return operations.length > 0 ? operations : null
-  }
-
-  // Check if SQL is a write operation
-  const isWriteOperation = (sql) => {
-    if (!sql) return false
-    const upperSQL = sql.toUpperCase()
-    return upperSQL.includes('UPDATE ') ||
-           upperSQL.includes('DELETE ') ||
-           upperSQL.includes('INSERT ')
   }
 
   // When switching to write mode, disable auto-execute for safety
@@ -125,61 +92,15 @@ export default function QueryInterface({
     setError(null)
 
     try {
-      const result = await onSubmit(question, {
+      await onSubmit(question, {
         execute: true,
         include_schema_context: true,
         read_only: readOnlyMode  // Pass read-only mode to backend
       })
 
-      // If write operation in write mode, enable rollback
-      if (!readOnlyMode && isWriteOperation(generatedResult.generated_sql)) {
-        setLastWriteOperation({
-          sql: generatedResult.generated_sql,
-          question: question,
-          result: result,
-          timestamp: Date.now()
-        })
-        setRollbackTimeLeft(30) // 30 second rollback window
-      }
-
       setGeneratedResult(null)
     } catch (err) {
       setError(err.response?.data?.detail?.message || err.message || 'Query failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Handle rollback
-  const handleRollback = async () => {
-    if (!lastWriteOperation) return
-
-    const confirmRollback = confirm(
-      'Are you sure you want to rollback the last operation?\n\n' +
-      'This will attempt to undo the changes made by:\n' +
-      lastWriteOperation.question
-    )
-
-    if (!confirmRollback) return
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Send rollback request to backend
-      await axios.post(`${API_BASE}/query/rollback`, {
-        original_sql: lastWriteOperation.sql,
-        question: lastWriteOperation.question
-      })
-
-      // Clear the write operation
-      setLastWriteOperation(null)
-      setRollbackTimeLeft(0)
-
-      // Show success message
-      alert('Operation successfully rolled back!')
-    } catch (err) {
-      setError(err.response?.data?.detail?.message || 'Rollback failed. Changes may be permanent.')
     } finally {
       setLoading(false)
     }
@@ -440,7 +361,7 @@ export default function QueryInterface({
                     <h4 className={`font-bold text-sm ${
                       hasCritical ? 'text-red-900' : 'text-orange-900'
                     }`}>
-                      {hasCritical ? '⚠️ CRITICAL WARNING: Destructive Operation Detected' : '⚠️ WARNING: Data Modification Detected'}
+                      {hasCritical ? 'CRITICAL WARNING: Destructive Operation Detected' : 'WARNING: Data Modification Detected'}
                     </h4>
                     <div className="mt-2 space-y-1">
                       {dangerousOps.map((op, idx) => (
@@ -495,65 +416,6 @@ export default function QueryInterface({
             </svg>
             <span>{readOnlyMode ? 'Execute Query' : 'I Understand - Execute Query'}</span>
           </button>
-        </div>
-      )}
-
-      {/* Rollback Panel - Shows after write operations */}
-      {lastWriteOperation && rollbackTimeLeft > 0 && (
-        <div className="mt-4 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-orange-400 rounded-lg p-4 shadow-lg">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0">
-              <svg className="w-6 h-6 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-bold text-orange-900">
-                  🔄 Rollback Available
-                </h4>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 text-sm font-medium text-orange-800">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                    </svg>
-                    <span>{rollbackTimeLeft}s</span>
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-sm text-orange-800 mb-3">
-                Your last operation has been executed. You can undo it within the next {rollbackTimeLeft} seconds.
-              </p>
-
-              <div className="bg-white bg-opacity-50 rounded p-2 mb-3">
-                <p className="text-xs font-medium text-orange-900 mb-1">Last Operation:</p>
-                <p className="text-xs text-orange-800 italic">"{lastWriteOperation.question}"</p>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleRollback}
-                  disabled={loading}
-                  className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                  </svg>
-                  Undo Changes
-                </button>
-                <button
-                  onClick={() => {
-                    setLastWriteOperation(null)
-                    setRollbackTimeLeft(0)
-                  }}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition-colors"
-                >
-                  Keep Changes
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </div>

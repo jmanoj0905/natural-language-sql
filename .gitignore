@@ -37,17 +37,23 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+.claude/
 
 # Environment Variables
 .env
 .env.local
 
 # Testing
+tests/
+test_*.py
+*_test.py
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .hypothesis/
+pytest.ini
+conftest.py
 
 # Logs
 logs/
@@ -100,6 +106,8 @@ frontend/dist/
 frontend/build/
 frontend/.vite/
 frontend/node_modules/
+cloudflare-backend/node_modules/
+cloudflare-backend/dist/
 
 # Docker
 docker-compose.override.yml

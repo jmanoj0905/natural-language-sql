@@ -19,7 +19,7 @@ export default function DatabaseOverview() {
       const response = await axios.get('/api/v1/databases')
       setDatabases(response.data.databases)
     } catch (error) {
-      console.error('Failed to load databases:', error)
+      // Silent fail - will show empty state
     } finally {
       setLoading(false)
     }
@@ -35,7 +35,6 @@ export default function DatabaseOverview() {
         [databaseId]: response.data.tables
       }))
     } catch (error) {
-      console.error('Failed to load schema:', error)
       setSchemas(prev => ({
         ...prev,
         [databaseId]: []

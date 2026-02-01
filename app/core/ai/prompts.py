@@ -239,14 +239,14 @@ def build_write_operation_prompt(
 Analyze the request and return a WHERE clause that safely identifies the target records.
 
 **Examples of SAFE matching:**
-✓ WHERE LOWER(username) = 'alice_brown'
-✓ WHERE username ILIKE '%alice%' AND username ILIKE '%brown%'
-✓ WHERE email = 'user@example.com'
+- WHERE LOWER(username) = 'alice_brown'
+- WHERE username ILIKE '%alice%' AND username ILIKE '%brown%'
+- WHERE email = 'user@example.com'
 
 **Examples of UNSAFE matching (DO NOT USE):**
-✗ WHERE pg_trgm_lower(username) = 'alice_brown'
-✗ WHERE username ~* 'regex'
-✗ WHERE similarity(username, 'alice') > 0.5
+- WHERE pg_trgm_lower(username) = 'alice_brown'
+- WHERE username ~* 'regex'
+- WHERE similarity(username, 'alice') > 0.5
 
 **Response Format:**
 ```sql

@@ -31,7 +31,10 @@
       "Bash(python -m py_compile:*)",
       "Bash(git add:*)",
       "Bash(cat:*)",
-      "Bash([ -f .gitignore ])"
+      "Bash([ -f .gitignore ])",
+      "Bash(npx wrangler:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
     ]
   }
 }

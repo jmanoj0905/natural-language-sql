@@ -12,7 +12,6 @@ from app.models.query import (
     ErrorResponse,
     WriteConfirmationRequest
 )
-from pydantic import BaseModel
 from app.core.database.connection_manager import get_db_manager, DatabaseConnectionManager
 from app.core.ai.ollama_sql_generator import SQLGenerator
 from app.core.query.validator import QueryValidator
@@ -28,12 +27,6 @@ from app.config import get_settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
-
-
-class RollbackRequest(BaseModel):
-    """Request to rollback a previous operation."""
-    original_sql: str
-    question: str
 
 
 @router.post("/natural", response_model=QueryResponse)
@@ -385,67 +378,6 @@ async def direct_sql_query(
                 "timestamp": datetime.now().isoformat()
             }
         )
-
-
-@router.post("/rollback")
-async def rollback_operation(
-    request: RollbackRequest,
-    database_id: Optional[str] = Query(None, description="Database ID (uses default if not specified)"),
-    db_manager: DatabaseConnectionManager = Depends(get_db_manager)
-) -> Dict[str, Any]:
-    """
-    Rollback a previous write operation.
-
-    NOTE: This is a placeholder implementation. For production use, implement one of:
-    1. Transaction-based rollback (keep transactions open for N seconds)
-    2. Inverse SQL generation (analyze original SQL and generate inverse)
-    3. Before/after snapshots (store data before operation, restore on rollback)
-
-    Args:
-        request: Rollback request with original SQL and question
-        database_id: Optional database ID
-
-    Returns:
-        Success/failure message
-    """
-    # Determine which database to use
-    target_db_id = database_id or db_manager._default_db_id
-
-    if not target_db_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "NO_DATABASE_SPECIFIED",
-                "message": "No database specified and no default database is set",
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
-    logger.warning(
-        "rollback_requested",
-        database_id=target_db_id,
-        original_sql=request.original_sql[:200],
-        question=request.question[:100]
-    )
-
-    # TODO: Implement actual rollback logic
-    # For now, return an error indicating rollback is not fully implemented
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "code": "ROLLBACK_NOT_IMPLEMENTED",
-            "message": "Rollback functionality requires transaction support. "
-                      "Please implement transaction-based execution to enable rollback.",
-            "details": {
-                "suggestion": "To enable rollback, the backend needs to:\n"
-                             "1. Start a database transaction before executing write queries\n"
-                             "2. Keep the transaction open for a configurable time window\n"
-                             "3. COMMIT on timeout or user confirmation\n"
-                             "4. ROLLBACK on user request within the time window"
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    )
 
 
 @router.post("/write/preview")

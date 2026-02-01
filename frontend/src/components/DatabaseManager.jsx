@@ -47,7 +47,7 @@ export default function DatabaseManager() {
         }
       }
     } catch (error) {
-      console.error('Failed to load databases:', error)
+      // Silent fail - will show empty state
     } finally {
       setLoading(false)
     }
@@ -63,7 +63,7 @@ export default function DatabaseManager() {
         [databaseId]: response.data.tables
       }))
     } catch (error) {
-      console.error('Failed to load schema:', error)
+      // Silent fail - schema will not be available
     }
   }
 
@@ -110,7 +110,6 @@ export default function DatabaseManager() {
       await axios.delete(`/api/v1/databases/${databaseId}`)
       await loadDatabases()
     } catch (error) {
-      console.error('Failed to remove database:', error)
       alert('Failed to remove database')
     }
   }
@@ -120,7 +119,6 @@ export default function DatabaseManager() {
       await axios.post(`/api/v1/databases/${databaseId}/set-default`)
       await loadDatabases()
     } catch (error) {
-      console.error('Failed to set default database:', error)
       alert('Failed to set default database')
     }
   }
