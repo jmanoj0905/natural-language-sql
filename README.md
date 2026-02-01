@@ -296,6 +296,7 @@ natural-lang-sql/
 │   └── package.json
 ├── docker-compose.yml           # Docker orchestration
 ├── run.sh                       # Unified management script
+├── install.sh                       # Unified installation script
 └── README.md                    # This file
 ```
 
