@@ -35,22 +35,47 @@ def build_sql_generation_prompt(
 8. Handle NULL values appropriately
 9. Use proper date/time functions if needed"""
     else:
-        operation_rules = """**Rules:**
-1. Generate DELETE, UPDATE, INSERT, or SELECT queries as requested
-2. Use standard SQL syntax (no PostgreSQL-specific extensions)
-3. Generate the SQL that matches the user's intent exactly
-4. For DELETE: DELETE FROM table WHERE condition
-5. For UPDATE: UPDATE table SET column = value WHERE condition
-6. For INSERT: INSERT INTO table (columns) VALUES (values)
-7. Use table and column names exactly as shown in the schema
-8. Return valid, executable SQL that does what the user asked
+        operation_rules = """**CRITICAL: Identify the Operation Type First!**
 
-**Important for User Deletions:**
-- When deleting a user by name (e.g., "delete alice brown"), treat the ENTIRE name as the username value
-- Example: "delete alice brown" → WHERE username = 'alice_brown' (NOT WHERE username = 'alice' AND role = 'brown')
-- Example: "delete user john doe" → WHERE username = 'john_doe'
-- Use underscores to connect multi-word names unless the schema shows otherwise
-- CHECK THE SAMPLE DATA above to see actual username formats and values"""
+**Operation Keywords:**
+- **INSERT/ADD/CREATE**: "add", "create", "insert", "new", "register" → Use INSERT INTO
+- **UPDATE/MODIFY**: "update", "change", "modify", "set", "edit" → Use UPDATE ... SET
+- **DELETE/REMOVE**: "delete", "remove", "drop user" (not drop table) → Use DELETE FROM
+- **READ/SELECT**: "show", "get", "find", "list", "select" → Use SELECT
+
+**Rules:**
+1. **FIRST**: Identify what operation the user wants (INSERT, UPDATE, DELETE, or SELECT)
+2. **THEN**: Generate the appropriate SQL for that operation
+3. Use standard SQL syntax (no PostgreSQL-specific extensions)
+4. Use table and column names exactly as shown in the schema
+5. CHECK THE SAMPLE DATA to understand data formats and existing values
+
+**For INSERT (Add/Create) Operations:**
+- User says: "add a user manoj_j email manoj@testing.com"
+  → Generate: INSERT INTO users (username, email) VALUES ('manoj_j', 'manoj@testing.com')
+- User says: "create new user john password abc123"
+  → Generate: INSERT INTO users (username, password) VALUES ('john', 'abc123')
+- **Map user's words to column names**: "full name" → full_name, "email" → email, etc.
+- **Include all provided values** in the INSERT statement
+- **NEVER generate DELETE when user says "add" or "create"!**
+
+**For DELETE Operations:**
+- User says: "delete user alice brown"
+  → Generate: DELETE FROM users WHERE username = 'alice_brown'
+- When deleting by name, treat the ENTIRE name as the username value
+- Use underscores to connect multi-word names unless schema shows otherwise
+- CHECK THE SAMPLE DATA to see actual username formats
+
+**For UPDATE Operations:**
+- User says: "update user john email to new@email.com"
+  → Generate: UPDATE users SET email = 'new@email.com' WHERE username = 'john'
+- Always include a WHERE clause to specify which record to update
+- **NEVER include generated/computed columns in UPDATE SET clause** (columns marked as is_generated=true)
+- Generated columns are automatically calculated - only update regular columns
+
+**For SELECT Operations:**
+- User says: "show all users"
+  → Generate: SELECT * FROM users LIMIT 100"""
 
     prompt = f"""You are an expert SQL query generator. Convert the natural language question into a valid SQL query.
 
@@ -63,11 +88,20 @@ IMPORTANT: The schema above includes actual sample rows from each table. Use thi
 - Identify exact values (e.g., if user says "delete alice brown", check if username='alice_brown' exists in sample data)
 - Understand data formats (e.g., how names are stored, whether they use underscores)
 - Match user input to actual column values
-- Generate more accurate WHERE clauses
+- Generate more accurate WHERE clauses for UPDATE/DELETE
+- Understand what columns exist for INSERT operations
 
-**Question:** {question}
+**User Request:** {question}
 
 {operation_rules.format(max_limit=max_limit, database_type=database_type)}
+
+**CRITICAL REMINDER:**
+- If user says "add"/"create"/"insert" → Generate INSERT INTO statement
+- If user says "update"/"change"/"modify" → Generate UPDATE statement
+- If user says "delete"/"remove" → Generate DELETE FROM statement
+- If user says "show"/"get"/"find" → Generate SELECT statement
+
+**DO NOT confuse operations! "add" means INSERT, NOT DELETE!**
 
 **Response Format:**
 Provide your response in exactly this format:

@@ -105,7 +105,7 @@ cmd_setup_ollama() {
 
     print_success "Docker is running"
     print_info "Starting Ollama container..."
-    docker-compose up -d ollama
+    docker compose up -d ollama
 
     print_info "Waiting for Ollama to be ready..."
     sleep 5
@@ -165,7 +165,7 @@ cmd_dev() {
         print_success "Ollama container already running"
     else
         print_info "Starting Ollama container..."
-        docker-compose up -d ollama
+        docker compose up -d ollama
         sleep 3
         print_success "Ollama container started"
     fi
@@ -176,7 +176,7 @@ cmd_dev() {
         print_success "PostgreSQL already running"
     else
         print_info "Starting PostgreSQL..."
-        docker-compose up -d postgres
+        docker compose up -d postgres
         sleep 5
         print_success "PostgreSQL started"
     fi
@@ -303,7 +303,7 @@ cmd_stop() {
     lsof -ti:8000 | xargs kill -9 2>/dev/null || true
 
     print_info "Stopping Docker containers..."
-    docker-compose stop 2>/dev/null || true
+    docker compose stop 2>/dev/null || true
 
     print_success "All services stopped"
 }
@@ -325,7 +325,7 @@ cmd_clean() {
     cmd_stop
 
     print_info "Removing Docker containers..."
-    docker-compose down 2>/dev/null || true
+    docker compose down 2>/dev/null || true
 
     print_info "Cleaning logs..."
     rm -rf logs/*.log logs/*.log.* 2>/dev/null || true

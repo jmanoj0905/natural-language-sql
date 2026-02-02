@@ -1,0 +1,41 @@
+services:
+  # Ollama AI Service for SQL generation
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nlsql-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database for storing queries and connections
+  postgres:
+    image: postgres:16-alpine
+    container_name: nlsql-postgres
+    environment:
+      POSTGRES_USER: nlsql
+      POSTGRES_PASSWORD: nlsql_dev_password
+      POSTGRES_DB: nlsql
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nlsql"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama_data:
+    driver: local
+  postgres_data:
+    driver: local

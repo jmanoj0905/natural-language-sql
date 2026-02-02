@@ -361,9 +361,9 @@ setup_docker_services() {
     fi
 
     print_info "Starting Ollama container..."
-    docker-compose up -d ollama 2>/dev/null || {
-        print_warning "Could not start Ollama via docker-compose"
-        print_info "You can start it manually later with: docker-compose up -d ollama"
+    docker compose up -d ollama 2>/dev/null || {
+        print_warning "Could not start Ollama via docker compose"
+        print_info "You can start it manually later with: docker compose up -d ollama"
         return
     }
 
@@ -386,7 +386,7 @@ setup_docker_services() {
         fi
     else
         print_error "Failed to start Ollama container"
-        print_info "You can start it manually later with: docker-compose up -d ollama"
+        print_info "You can start it manually later with: docker compose up -d ollama"
     fi
 }
 

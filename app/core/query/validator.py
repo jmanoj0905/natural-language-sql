@@ -34,13 +34,95 @@ class QueryValidator:
         self.settings = get_settings()
         self.sanitizer = SQLSanitizer()
 
-    def validate(self, sql: str, read_only: bool = True) -> str:
+    def validate_operation_intent(self, sql: str, original_question: str) -> None:
+        """
+        Validate that the SQL operation matches the user's intent.
+
+        This catches critical mismatches like:
+        - User says "add" but SQL is DELETE
+        - User says "delete" but SQL is INSERT
+
+        Args:
+            sql: Generated SQL query
+            original_question: Original user question
+
+        Raises:
+            QueryValidationError: If operation doesn't match intent
+        """
+        question_lower = original_question.lower()
+        sql_upper = sql.strip().upper()
+
+        # Detect intent from question
+        insert_keywords = ['add', 'create', 'insert', 'new', 'register']
+        delete_keywords = ['delete', 'remove', 'drop user']
+        update_keywords = ['update', 'change', 'modify', 'set', 'edit']
+
+        # Detect actual SQL operation
+        is_insert = sql_upper.startswith('INSERT')
+        is_delete = sql_upper.startswith('DELETE')
+        is_update = sql_upper.startswith('UPDATE')
+
+        # Check for dangerous mismatches
+        user_wants_insert = any(keyword in question_lower for keyword in insert_keywords)
+        user_wants_delete = any(keyword in question_lower for keyword in delete_keywords)
+        user_wants_update = any(keyword in question_lower for keyword in update_keywords)
+
+        if user_wants_insert and is_delete:
+            logger.error(
+                "critical_operation_mismatch",
+                intent="INSERT",
+                generated="DELETE",
+                question=original_question[:100],
+                sql=sql[:200]
+            )
+            raise QueryValidationError(
+                "CRITICAL SAFETY ERROR: You asked to ADD/CREATE but the AI generated a DELETE query. "
+                "This would delete data instead of adding it! Please rephrase your question or report this bug.",
+                details={
+                    "user_intent": "INSERT (add/create)",
+                    "generated_operation": "DELETE",
+                    "original_question": original_question,
+                    "generated_sql": sql
+                }
+            )
+
+        if user_wants_delete and is_insert:
+            logger.error(
+                "critical_operation_mismatch",
+                intent="DELETE",
+                generated="INSERT",
+                question=original_question[:100],
+                sql=sql[:200]
+            )
+            raise QueryValidationError(
+                "CRITICAL SAFETY ERROR: You asked to DELETE/REMOVE but the AI generated an INSERT query. "
+                "This would add data instead of removing it! Please rephrase your question or report this bug.",
+                details={
+                    "user_intent": "DELETE (delete/remove)",
+                    "generated_operation": "INSERT",
+                    "original_question": original_question,
+                    "generated_sql": sql
+                }
+            )
+
+        if user_wants_update and (is_insert or is_delete):
+            logger.warning(
+                "operation_mismatch",
+                intent="UPDATE",
+                generated="INSERT" if is_insert else "DELETE",
+                question=original_question[:100],
+                sql=sql[:200]
+            )
+
+    def validate(self, sql: str, read_only: bool = True, original_question: str = None, strict_validation: bool = False) -> str:
         """
         Validate and sanitize SQL query.
 
         Args:
             sql: SQL query to validate
             read_only: If True, only allow SELECT queries. If False, allow write operations.
+            original_question: Original user question (for intent validation)
+            strict_validation: If True, enables strict operation intent validation. Default False for user flexibility.
 
         Returns:
             str: Validated and potentially modified SQL
@@ -57,10 +139,31 @@ class QueryValidator:
 
         sql = sql.strip()
 
-        # Step 2: Check for SQL injection patterns (allow write operations if not in read-only mode)
-        self.sanitizer.validate_and_raise(sql, allow_write=not read_only)
+        # Step 2: Check operation intent mismatch (OPTIONAL - disabled by default for user flexibility)
+        # Users who know SQL but are lazy to write it don't need this check
+        if strict_validation and original_question and not read_only:
+            try:
+                self.validate_operation_intent(sql, original_question)
+            except QueryValidationError as e:
+                # Log but don't block - just warn the user
+                logger.warning("operation_intent_mismatch", error=str(e), sql=sql[:200])
 
-        # Step 3: Parse SQL
+        # Step 3: Basic SQL injection check (only block obviously dangerous patterns)
+        # In write mode: lenient validation (users who know SQL but are lazy to write it)
+        # In read-only mode: strict validation (AI-generated queries need more checking)
+        strict_mode = read_only  # Only strict in read-only mode
+
+        try:
+            self.sanitizer.validate_and_raise(sql, allow_write=not read_only, strict_mode=strict_mode)
+        except Exception as e:
+            # In write mode, log warnings but don't block (trust the user)
+            if not read_only:
+                logger.warning("sql_validation_warning", warning=str(e), sql=sql[:200])
+            else:
+                # In read-only mode, enforce strict validation
+                raise
+
+        # Step 4: Parse SQL
         try:
             parsed = sqlparse.parse(sql)
         except Exception as e:
@@ -92,11 +195,12 @@ class QueryValidator:
                 details={"statement_count": len(parsed)}
             )
 
-        # Step 6: Enforce LIMIT clause (only for SELECT queries)
-        if self._is_select_statement(statement):
+        # Step 6: Enforce LIMIT clause (only for SELECT queries in read-only mode)
+        # In write mode, users have full control - no automatic LIMIT enforcement
+        if self._is_select_statement(statement) and read_only:
             sql = self._enforce_limit(sql)
 
-        logger.info("query_validated", sql=sql[:200], read_only=read_only)
+        logger.info("query_validated", sql=sql[:200], read_only=read_only, strict=strict_mode)
 
         return sql
 

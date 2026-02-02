@@ -10,10 +10,12 @@ from app.models.query import (
     QueryResponse,
     ExecutionResult,
     ErrorResponse,
-    WriteConfirmationRequest
+    WriteConfirmationRequest,
+    QueryStep
 )
 from app.core.database.connection_manager import get_db_manager, DatabaseConnectionManager
 from app.core.ai.ollama_sql_generator import SQLGenerator
+from app.core.ai.query_planner import IntelligentQueryPlanner
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
 from app.dependencies import (
@@ -118,56 +120,201 @@ async def natural_language_query(
                 sql=sql[:200]
             )
 
-            # Step 2: Validate SQL (pass read_only flag)
-            validated_sql = validator.validate(sql, read_only=request.options.read_only)
+            # Step 1.5: Check if this requires intelligent multi-query planning
+            query_planner = IntelligentQueryPlanner()
 
-            # Step 3: Check for DELETE operations and require confirmation
-            sql_upper = validated_sql.upper().strip()
-            is_delete = sql_upper.startswith('DELETE')
-            is_write = any(sql_upper.startswith(op) for op in ['DELETE', 'UPDATE', 'INSERT', 'DROP', 'TRUNCATE', 'ALTER'])
+            # Get schema context for planning
+            from app.core.database.schema_inspector import SchemaInspector
+            inspector = SchemaInspector()
+            schema_context = await inspector.get_schema_summary(
+                connection=conn,
+                db_id=target_db_id,
+                max_tables=20,
+                include_sample_data=True
+            )
 
-            # Log all write operations
-            if is_write:
-                logger.warning(
-                    "write_operation_generated",
+            analysis = query_planner.analyze_request(request.question, schema_context)
+
+            logger.info(
+                "query_complexity_analysis",
+                database_id=target_db_id,
+                complexity=analysis["complexity"],
+                requires_multi_query=analysis["requires_multi_query"],
+                requires_dependency_resolution=analysis["requires_dependency_resolution"]
+            )
+
+            # Step 2: Create query plan (single or multi-query)
+            query_steps_list = None
+            is_multi_query = False
+
+            if analysis["requires_dependency_resolution"]:
+                # Create multi-step plan with dependency resolution
+                query_plan = query_planner.create_dependency_resolution_plan(
+                    question=request.question,
+                    schema_context=schema_context,
+                    ai_generated_sql=sql,
+                    ai_explanation=explanation
+                )
+                is_multi_query = True
+
+                logger.info(
+                    "multi_query_plan_created",
                     database_id=target_db_id,
-                    question=request.question[:100],
-                    sql_type=sql_upper.split()[0],
-                    sql=validated_sql[:200],
-                    execute_requested=request.options.execute,
-                    confirmed=request.options.confirm_delete if is_delete else None
+                    step_count=len(query_plan.steps),
+                    requires_dependency_resolution=query_plan.requires_dependency_resolution
                 )
 
-            # Step 3: Execute query if requested
-            execution_result = None
-            if request.options.execute:
-                results, exec_time = await executor.execute(
-                    connection=conn,
-                    sql=validated_sql
+                # Execute multi-step plan if requested
+                query_steps_list = []
+                if request.options.execute:
+                    for plan_step in query_plan.steps:
+                        # Validate each SQL step
+                        validated_step_sql = validator.validate(
+                            plan_step.sql,
+                            read_only=request.options.read_only,
+                            original_question=request.question
+                        )
+
+                        # Check if this is an existence check
+                        if plan_step.check_existence:
+                            # Execute existence check
+                            results, exec_time = await executor.execute(
+                                connection=conn,
+                                sql=validated_step_sql
+                            )
+
+                            # Check if entity exists (COUNT > 0)
+                            entity_exists = results and results[0].get('count', 0) > 0
+
+                            query_steps_list.append(QueryStep(
+                                step_number=plan_step.step_number,
+                                sql=validated_step_sql,
+                                explanation=plan_step.explanation,
+                                execution_result=ExecutionResult(
+                                    rows=results,
+                                    row_count=len(results),
+                                    execution_time_ms=round(exec_time, 2),
+                                    columns=list(results[0].keys()) if results else []
+                                ),
+                                skipped=False
+                            ))
+
+                            # If entity exists, skip the next INSERT step
+                            if entity_exists and plan_step.step_number < len(query_plan.steps):
+                                next_step = query_plan.steps[plan_step.step_number]  # 0-indexed
+                                if next_step.depends_on_previous:
+                                    query_steps_list.append(QueryStep(
+                                        step_number=next_step.step_number,
+                                        sql=next_step.sql,
+                                        explanation=next_step.explanation,
+                                        skipped=True,
+                                        skip_reason="Entity already exists"
+                                    ))
+                                    continue
+
+                        elif not plan_step.check_existence:
+                            # Regular execution step
+                            # Check if previous step indicated we should skip this
+                            if query_steps_list and query_steps_list[-1].skipped and plan_step.depends_on_previous:
+                                continue
+
+                            results, exec_time = await executor.execute(
+                                connection=conn,
+                                sql=validated_step_sql
+                            )
+
+                            query_steps_list.append(QueryStep(
+                                step_number=plan_step.step_number,
+                                sql=validated_step_sql,
+                                explanation=plan_step.explanation,
+                                execution_result=ExecutionResult(
+                                    rows=results,
+                                    row_count=len(results),
+                                    execution_time_ms=round(exec_time, 2),
+                                    columns=list(results[0].keys()) if results else []
+                                ),
+                                skipped=False
+                            ))
+
+                            logger.info(
+                                "query_step_executed",
+                                database_id=target_db_id,
+                                step_number=plan_step.step_number,
+                                sql=validated_step_sql[:200],
+                                row_count=len(results)
+                            )
+
+                else:
+                    # Not executing - just return the plan
+                    for plan_step in query_plan.steps:
+                        query_steps_list.append(QueryStep(
+                            step_number=plan_step.step_number,
+                            sql=plan_step.sql,
+                            explanation=plan_step.explanation,
+                            execution_result=None,
+                            skipped=False
+                        ))
+
+                # Use the final step's SQL as the main generated_sql
+                validated_sql = query_plan.steps[-1].sql
+                execution_result = query_steps_list[-1].execution_result if query_steps_list and query_steps_list[-1].execution_result else None
+
+            else:
+                # Simple single-query case
+                # Step 2: Validate SQL (pass read_only flag and original question for intent validation)
+                validated_sql = validator.validate(
+                    sql,
+                    read_only=request.options.read_only,
+                    original_question=request.question
                 )
 
-                # Get column names from first row if available
-                columns = list(results[0].keys()) if results else []
+                # Step 3: Check for DELETE operations and require confirmation
+                sql_upper = validated_sql.upper().strip()
+                is_delete = sql_upper.startswith('DELETE')
+                is_write = any(sql_upper.startswith(op) for op in ['DELETE', 'UPDATE', 'INSERT', 'DROP', 'TRUNCATE', 'ALTER'])
 
-                execution_result = ExecutionResult(
-                    rows=results,
-                    row_count=len(results),
-                    execution_time_ms=round(exec_time, 2),
-                    columns=columns
-                )
-
-                # Log write operation execution
+                # Log all write operations
                 if is_write:
                     logger.warning(
-                        "write_operation_executed",
+                        "write_operation_generated",
                         database_id=target_db_id,
                         question=request.question[:100],
                         sql_type=sql_upper.split()[0],
                         sql=validated_sql[:200],
-                        affected_rows=len(results),
-                        execution_time_ms=round(exec_time, 2),
+                        execute_requested=request.options.execute,
                         confirmed=request.options.confirm_delete if is_delete else None
                     )
+
+                # Step 3: Execute query if requested
+                execution_result = None
+                if request.options.execute:
+                    results, exec_time = await executor.execute(
+                        connection=conn,
+                        sql=validated_sql
+                    )
+
+                    # Get column names from first row if available
+                    columns = list(results[0].keys()) if results else []
+
+                    execution_result = ExecutionResult(
+                        rows=results,
+                        row_count=len(results),
+                        execution_time_ms=round(exec_time, 2),
+                        columns=columns
+                    )
+
+                    # Log write operation execution
+                    if is_write:
+                        logger.warning(
+                            "write_operation_executed",
+                            database_id=target_db_id,
+                            question=request.question[:100],
+                            sql_type=sql_upper.split()[0],
+                            sql=validated_sql[:200],
+                            affected_rows=len(results),
+                            execution_time_ms=round(exec_time, 2),
+                            confirmed=request.options.confirm_delete if is_delete else None
+                        )
 
         # Step 4: Build response
         warnings = []
@@ -187,7 +334,9 @@ async def natural_language_query(
                 "executed": request.options.execute,
                 "write_operation_detected": is_write_operation,
                 "read_only_mode": request.options.read_only
-            }
+            },
+            query_steps=query_steps_list,
+            is_multi_query=is_multi_query
         )
 
         logger.info(

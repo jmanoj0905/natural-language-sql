@@ -4,8 +4,10 @@ import DatabaseSidebar from './DatabaseSidebar'
 import ConnectionConfigPanel from './ConnectionConfigPanel'
 import DatabaseProviderGrid from './DatabaseProviderGrid'
 import { getProviderById } from '../data/providers'
+import { useToast } from '../hooks/useToast.jsx'
 
 export default function DatabaseConnectionManager() {
+  const { showError, showSuccess, showWarning } = useToast()
   const [databases, setDatabases] = useState([])
   const [selectedDatabaseId, setSelectedDatabaseId] = useState(null)
   const [isNewConnection, setIsNewConnection] = useState(false)
@@ -59,7 +61,8 @@ export default function DatabaseConnectionManager() {
       const response = await axios.get('/api/v1/databases')
       setDatabases(response.data.databases)
     } catch (error) {
-      // Silent fail - will show empty state
+      console.error('Failed to load databases:', error)
+      showError('Failed to load databases')
     } finally {
       setLoading(false)
     }
@@ -110,9 +113,10 @@ export default function DatabaseConnectionManager() {
       if (selectedDatabaseId === databaseId) {
         setSelectedDatabaseId(null)
         setIsNewConnection(false)
+        showSuccess('Database removed successfully')
       }
     } catch (error) {
-      alert('Failed to remove database')
+      showError('Failed to remove database')
     }
   }
 
@@ -170,6 +174,7 @@ export default function DatabaseConnectionManager() {
         await loadDatabases()
         setIsNewConnection(false)
         setSelectedDatabaseId(formData.database_id)
+        showSuccess('Database connection added successfully')
       } else {
         // Update existing database connection
         const updateData = { ...formData }
@@ -180,12 +185,13 @@ export default function DatabaseConnectionManager() {
 
         await axios.put(`/api/v1/databases/${formData.database_id}`, updateData)
         await loadDatabases()
+        showSuccess('Database connection updated successfully')
       }
 
       setTestResult(null)
     } catch (error) {
-      const errorMsg = error.response?.data?.detail?.message || 'Failed to save database'
-      alert(errorMsg)
+      const errorMsg = error.response?.data?.detail?.message || error.response?.data?.detail || 'Failed to save database'
+      showError(errorMsg)
     }
   }
 

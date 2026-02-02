@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useToast } from '../hooks/useToast.jsx'
 
 export default function QueryInterface({
   onSubmit,
@@ -6,6 +7,7 @@ export default function QueryInterface({
   selectedDatabases = [],
   onDatabaseSelectionChange
 }) {
+  const { showError, showSuccess, showWarning } = useToast()
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -79,7 +81,9 @@ export default function QueryInterface({
         }
       }
     } catch (err) {
-      setError(err.response?.data?.detail?.message || err.message || 'Query failed')
+      const errorMessage = err.response?.data?.detail?.message || err.response?.data?.detail || err.message || 'Query failed'
+      setError(errorMessage)
+      showError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -100,7 +104,9 @@ export default function QueryInterface({
 
       setGeneratedResult(null)
     } catch (err) {
-      setError(err.response?.data?.detail?.message || err.message || 'Query failed')
+      const errorMessage = err.response?.data?.detail?.message || err.response?.data?.detail || err.message || 'Query failed'
+      setError(errorMessage)
+      showError(errorMessage)
     } finally {
       setLoading(false)
     }

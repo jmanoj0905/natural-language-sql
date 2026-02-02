@@ -2,12 +2,14 @@
 
 import asyncio
 import json
+import base64
 from pathlib import Path
 from typing import Optional, Dict, List
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncConnection
 from sqlalchemy.pool import NullPool, QueuePool
 from sqlalchemy import text
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import get_settings
 from app.models.database import DatabaseConfig
@@ -34,8 +36,95 @@ class DatabaseConnectionManager:
         self._default_db_id: Optional[str] = None
         self.settings = get_settings()
 
+        # Initialize encryption key
+        self._cipher = self._get_or_create_cipher()
+
         # Load saved database configurations on startup
         self._load_saved_databases()
+
+    def _get_or_create_cipher(self) -> Fernet:
+        """
+        Get or create Fernet cipher for password encryption.
+
+        Returns:
+            Fernet cipher instance
+
+        Raises:
+            DatabaseConfigurationError: If encryption key is invalid
+        """
+        settings = get_settings()
+        encryption_key = settings.DB_ENCRYPTION_KEY
+
+        if not encryption_key:
+            # Generate a new key and warn the user
+            encryption_key = Fernet.generate_key().decode()
+            logger.warning(
+                "no_encryption_key_configured",
+                message="DB_ENCRYPTION_KEY not set in environment. Generated temporary key. "
+                "Set DB_ENCRYPTION_KEY in .env for persistent encryption across restarts.",
+                generated_key=encryption_key
+            )
+
+        try:
+            # Ensure the key is bytes
+            if isinstance(encryption_key, str):
+                encryption_key = encryption_key.encode()
+
+            return Fernet(encryption_key)
+        except Exception as e:
+            logger.error("invalid_encryption_key", error=str(e))
+            raise DatabaseConfigurationError(
+                f"Invalid DB_ENCRYPTION_KEY: {str(e)}. "
+                "Generate a valid key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+
+    def _encrypt_password(self, password: str) -> str:
+        """
+        Encrypt password using Fernet symmetric encryption.
+
+        Args:
+            password: Plain text password
+
+        Returns:
+            Base64-encoded encrypted password
+        """
+        if not password:
+            return ""
+
+        try:
+            encrypted_bytes = self._cipher.encrypt(password.encode())
+            return base64.b64encode(encrypted_bytes).decode()
+        except Exception as e:
+            logger.error("password_encryption_failed", error=str(e))
+            raise DatabaseConfigurationError(f"Failed to encrypt password: {str(e)}")
+
+    def _decrypt_password(self, encrypted_password: str) -> str:
+        """
+        Decrypt password using Fernet symmetric encryption.
+
+        Args:
+            encrypted_password: Base64-encoded encrypted password
+
+        Returns:
+            Plain text password
+        """
+        if not encrypted_password:
+            return ""
+
+        try:
+            # Handle both old plaintext passwords and new encrypted ones
+            # If decryption fails, assume it's plaintext (for migration)
+            encrypted_bytes = base64.b64decode(encrypted_password.encode())
+            decrypted_bytes = self._cipher.decrypt(encrypted_bytes)
+            return decrypted_bytes.decode()
+        except (InvalidToken, Exception) as e:
+            # If decryption fails, assume it's plaintext (backwards compatibility)
+            logger.warning(
+                "password_decryption_failed_assuming_plaintext",
+                error=str(e),
+                message="Password appears to be in plaintext. Will be encrypted on next save."
+            )
+            return encrypted_password
 
     def configure(self, config: DatabaseConfig) -> None:
         """
@@ -354,6 +443,9 @@ class DatabaseConnectionManager:
             }
 
             for db_id, config in self._configs.items():
+                # Encrypt password before saving
+                encrypted_password = self._encrypt_password(config.password)
+
                 data["databases"][db_id] = {
                     "database_id": config.database_id,
                     "nickname": config.nickname,
@@ -361,7 +453,7 @@ class DatabaseConnectionManager:
                     "port": config.port,
                     "database": config.database,
                     "username": config.username,
-                    "password": config.password,  # Note: In production, encrypt this!
+                    "password": encrypted_password,  # Encrypted password
                     "ssl_mode": config.ssl_mode,
                     "db_type": config.db_type
                 }
@@ -396,7 +488,12 @@ class DatabaseConnectionManager:
             loaded_count = 0
             for db_id, config_data in databases.items():
                 try:
-                    logger.info("loading_database", database_id=db_id, config=config_data)
+                    logger.info("loading_database", database_id=db_id)
+
+                    # Decrypt password before creating config
+                    if "password" in config_data and config_data["password"]:
+                        config_data["password"] = self._decrypt_password(config_data["password"])
+
                     config = DatabaseConfig(**config_data)
                     self.register_database(db_id, config, save_to_disk=False)
                     loaded_count += 1

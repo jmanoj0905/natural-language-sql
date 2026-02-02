@@ -2,9 +2,10 @@
 
 from functools import lru_cache
 from typing import List
-from pydantic import field_validator
+from pydantic import field_validator, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
+from urllib.parse import urlparse
 
 
 class Settings(BaseSettings):
@@ -31,6 +32,8 @@ class Settings(BaseSettings):
     DEFAULT_QUERY_LIMIT: int = 100
     QUERY_TIMEOUT_SECONDS: int = 30
     API_RATE_LIMIT_PER_MINUTE: int = 60
+    DB_ENCRYPTION_KEY: str = ""  # Fernet encryption key for database passwords
+    STRICT_SQL_VALIDATION: bool = False  # If True, strict validation. If False, trusts users who know SQL
 
     # Database Connection Defaults
     DB_POOL_SIZE: int = 5
@@ -93,6 +96,70 @@ class Settings(BaseSettings):
         """Validate Ollama temperature is between 0 and 2."""
         if not 0 <= v <= 2:
             raise ValueError("OLLAMA_TEMPERATURE must be between 0 and 2")
+        return v
+
+    @field_validator("OLLAMA_BASE_URL")
+    @classmethod
+    def validate_ollama_url(cls, v):
+        """Validate Ollama base URL is a valid URL."""
+        if not v:
+            raise ValueError("OLLAMA_BASE_URL cannot be empty")
+
+        try:
+            parsed = urlparse(v)
+            if not parsed.scheme:
+                raise ValueError("OLLAMA_BASE_URL must include a scheme (http:// or https://)")
+            if not parsed.netloc:
+                raise ValueError("OLLAMA_BASE_URL must include a valid host")
+            if parsed.scheme not in ["http", "https"]:
+                raise ValueError("OLLAMA_BASE_URL must use http or https scheme")
+        except Exception as e:
+            raise ValueError(f"Invalid OLLAMA_BASE_URL: {str(e)}")
+
+        return v.rstrip("/")  # Remove trailing slash for consistency
+
+    @field_validator("DB_ENCRYPTION_KEY")
+    @classmethod
+    def validate_encryption_key(cls, v):
+        """Validate encryption key format if provided."""
+        if not v:
+            # Empty is allowed - will generate temp key at runtime
+            return v
+
+        # Check if it's a valid base64 Fernet key (44 characters)
+        if len(v) != 44:
+            raise ValueError(
+                "DB_ENCRYPTION_KEY must be a valid Fernet key (44 characters). "
+                "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+
+        # Try to validate it's base64
+        try:
+            import base64
+            base64.urlsafe_b64decode(v.encode())
+        except Exception:
+            raise ValueError("DB_ENCRYPTION_KEY must be a valid base64-encoded Fernet key")
+
+        return v
+
+    @field_validator("API_RATE_LIMIT_PER_MINUTE")
+    @classmethod
+    def validate_rate_limit(cls, v):
+        """Validate rate limit is reasonable."""
+        if v <= 0:
+            raise ValueError("API_RATE_LIMIT_PER_MINUTE must be greater than 0")
+        if v > 10000:
+            raise ValueError("API_RATE_LIMIT_PER_MINUTE seems unreasonably high (max 10000)")
+        return v
+
+    @field_validator("MAX_QUERY_RESULTS")
+    @classmethod
+    def validate_max_query_results(cls, v):
+        """Validate maximum query results is reasonable."""
+        if v <= 0:
+            raise ValueError("MAX_QUERY_RESULTS must be greater than 0")
+        if v > 100000:
+            raise ValueError("MAX_QUERY_RESULTS is too high (max 100000 for memory safety)")
         return v
 
 

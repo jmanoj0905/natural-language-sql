@@ -1,8 +1,10 @@
 """Schema introspection utility for PostgreSQL databases."""
 
+import re
 from typing import List, Dict, Any, Optional
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.sql import quoted_name
 from cachetools import TTLCache
 
 from app.config import get_settings
@@ -10,6 +12,10 @@ from app.exceptions import SchemaIntrospectionError, TableNotFoundError
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Regex pattern for valid PostgreSQL identifiers (table/column names)
+# Must start with letter or underscore, followed by letters, digits, or underscores
+VALID_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
 class SchemaInspector:
@@ -28,6 +34,39 @@ class SchemaInspector:
         self._caches: Dict[str, TTLCache] = {}
         self._cache_enabled = settings.ENABLE_SCHEMA_CACHE
         self._cache_ttl = settings.SCHEMA_CACHE_TTL_SECONDS
+
+    @staticmethod
+    def _validate_identifier(name: str, identifier_type: str = "identifier") -> None:
+        """
+        Validate SQL identifier (table name, column name, etc.) to prevent SQL injection.
+
+        Args:
+            name: The identifier to validate
+            identifier_type: Type of identifier for error messages (e.g., "table", "column")
+
+        Raises:
+            ValueError: If the identifier is invalid or potentially malicious
+        """
+        if not name:
+            raise ValueError(f"Invalid {identifier_type} name: cannot be empty")
+
+        if len(name) > 63:  # PostgreSQL max identifier length
+            raise ValueError(f"Invalid {identifier_type} name: exceeds 63 characters")
+
+        if not VALID_IDENTIFIER_PATTERN.match(name):
+            raise ValueError(
+                f"Invalid {identifier_type} name '{name}': must start with letter or underscore, "
+                "followed by letters, digits, or underscores only"
+            )
+
+        # Additional check for reserved keywords that could be malicious
+        dangerous_keywords = ['drop', 'delete', 'truncate', 'alter', 'create', 'grant', 'revoke']
+        if name.lower() in dangerous_keywords:
+            logger.warning(
+                "suspicious_identifier_detected",
+                identifier=name,
+                type=identifier_type
+            )
 
     def _get_cache(self, db_id: str) -> Optional[TTLCache]:
         """
@@ -91,8 +130,9 @@ class SchemaInspector:
                 columns = table["columns"]
 
                 # Format: table_name (col1 type1, col2 type2, ...)
+                # Mark generated columns so AI knows not to UPDATE them
                 col_str = ", ".join(
-                    f"{col['name']} {col['type']}"
+                    f"{col['name']} {col['type']}" + (" [GENERATED]" if col.get('is_generated', False) else "")
                     for col in columns[:10]  # Limit columns per table
                 )
 
@@ -193,7 +233,8 @@ class SchemaInspector:
                 column_name,
                 data_type,
                 is_nullable,
-                column_default
+                column_default,
+                is_generated
             FROM information_schema.columns
             WHERE table_schema = 'public'
             ORDER BY table_name, ordinal_position
@@ -216,7 +257,8 @@ class SchemaInspector:
                 "name": row[1],
                 "type": row[2],
                 "nullable": row[3] == "YES",
-                "default": row[4]
+                "default": row[4],
+                "is_generated": row[5] == "ALWAYS"  # Detect generated/computed columns
             }
 
             if table_name not in tables_dict:
@@ -260,13 +302,13 @@ class SchemaInspector:
             List of sample rows as dictionaries
         """
         try:
-            # Use parameterized query safely - table name needs special handling
-            # Since we can't parameterize table names, validate it first
-            if not table_name.replace('_', '').isalnum():
-                logger.warning("invalid_table_name_for_sampling", table_name=table_name)
-                return []
+            # Validate table name to prevent SQL injection
+            self._validate_identifier(table_name, "table")
 
-            query = text(f"SELECT * FROM {table_name} LIMIT :limit")
+            # Use proper identifier quoting for table name
+            # Double quotes ensure case-sensitivity and allow reserved words
+            quoted_table = f'"{table_name}"'
+            query = text(f"SELECT * FROM {quoted_table} LIMIT :limit")
             result = await connection.execute(query, {"limit": limit})
             rows = result.fetchall()
             columns = result.keys()
@@ -287,6 +329,14 @@ class SchemaInspector:
 
             return sample_data
 
+        except ValueError as e:
+            # Validation error - log as warning
+            logger.warning(
+                "invalid_table_name_for_sampling",
+                table_name=table_name,
+                error=str(e)
+            )
+            return []
         except Exception as e:
             logger.debug(
                 "failed_to_get_sample_rows",
@@ -319,7 +369,8 @@ class SchemaInspector:
                 data_type,
                 is_nullable,
                 column_default,
-                character_maximum_length
+                character_maximum_length,
+                is_generated
             FROM information_schema.columns
             WHERE table_schema = 'public'
                 AND table_name = :table_name
@@ -338,7 +389,8 @@ class SchemaInspector:
                 "type": row[1],
                 "nullable": row[2] == "YES",
                 "default": row[3],
-                "max_length": row[4]
+                "max_length": row[4],
+                "is_generated": row[5] == "ALWAYS"  # Detect generated/computed columns
             }
             for row in rows
         ]

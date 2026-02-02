@@ -23,11 +23,34 @@ A production-ready Natural Language to SQL Query Engine that allows users to que
 
 ## Architecture
 
+![System Architecture](architecture.png)
+
+**📚 Architecture Documentation:**
+- 🧠 **[Mind Map View](ARCHITECTURE_MINDMAP.md)** - Visual, easy-to-navigate architecture (Recommended!)
+- 🎨 **[Mermaid Diagrams](MERMAID_DIAGRAMS.md)** - 10 interactive diagrams (System, Flow, Security, etc.)
+- 📋 **[Architecture Guide](ARCHITECTURE_GUIDE.md)** - Choose the right documentation
+- 📖 **[Detailed Docs](ARCHITECTURE.md)** - Comprehensive architecture guide (if exists)
+
+**Quick Overview:**
 ```
 User Question → Frontend (React) → Backend (FastAPI) → Schema Inspector → Ollama AI → SQL Generator → Query Validator → Query Executor → PostgreSQL/MySQL
 ```
 
+**Key Components:**
+- **Frontend**: React + Vite with Toast notifications & Multi-Query UI
+- **Backend**: FastAPI with intelligent query planning & rate limiting
+- **AI**: Ollama (llama3.2) for local SQL generation
+- **Smart Features**: Auto-dependency resolution, generated column protection
+- **Security**: 6-layer defense system (SQL injection prevention, encryption, rate limiting)
+
 ## Quick Start
+
+### Prerequisites
+
+Before starting, ensure you have:
+- **Docker Desktop** - Running and accessible
+- **Python 3.12+** - Or `uv` (recommended)
+- **Node.js 18+** - With npm
 
 ### First Time Setup
 
@@ -39,11 +62,12 @@ Run the installation script to automatically detect your system and install depe
 
 This script will:
 1. Detect your OS (macOS/Linux/Windows) and architecture (x86_64/ARM64)
-2. Check for required tools (Docker, Python 3.12+, Node.js 18+)
-3. Set up Python virtual environment
+2. Verify required tools (Docker, Python 3.12+, Node.js 18+)
+3. Set up Python virtual environment (or use uv)
 4. Install all dependencies (Python + Node.js)
-5. Set up Docker Ollama with llama3.2 model
-6. Create .env configuration file
+5. Set up Docker Compose services (Ollama + PostgreSQL)
+6. Pull llama3.2 model (~2GB download)
+7. Create .env configuration file from template
 
 ### Start the Application
 
@@ -59,31 +83,48 @@ This will:
 3. Start backend (FastAPI)
 4. Start frontend (React)
 
-After 30 seconds, open http://localhost:3000
+**Wait 30-60 seconds** for all services to initialize, then open http://localhost:3000
 
 The application is now running with:
-- Frontend at http://localhost:3000
-- Backend API at http://localhost:8000
-- API Docs at http://localhost:8000/docs
-- PostgreSQL on localhost:5432
-- Ollama AI on localhost:11434
+- **Frontend** → http://localhost:3000
+- **Backend API** → http://localhost:8000
+- **API Docs** → http://localhost:8000/docs
+- **PostgreSQL** → localhost:5432 (user: nlsql, db: nlsql)
+- **Ollama AI** → http://localhost:11434
 
-### Additional Commands
+### Management Commands
 
 **Installation (first time only):**
 ```bash
-./install.sh          # Auto-detect system and install dependencies
+./install.sh           # Auto-detect system and install all dependencies
 ```
 
 **Running the application:**
 ```bash
-./run.sh dev          # Start development environment
-./run.sh dev --verbose # Start with live logs
-./run.sh prod         # Start production mode (backend only)
-./run.sh stop         # Stop all services
-./run.sh clean        # Clean up containers, logs, cache
-./run.sh logs         # View application logs
-./run.sh help         # Show all commands
+./run.sh dev           # Start development environment
+./run.sh dev --verbose # Start with live logs in terminal
+./run.sh prod          # Start production mode (backend only)
+```
+
+**Ollama setup:**
+```bash
+./run.sh setup-ollama  # Setup Ollama container and pull llama3.2
+```
+
+**Service management:**
+```bash
+./run.sh stop          # Stop all running services
+./run.sh clean         # Remove containers, logs, and cache
+./run.sh logs          # View application logs interactively
+./run.sh help          # Show all available commands
+```
+
+**Direct Docker Compose:**
+```bash
+docker compose up -d           # Start all services in background
+docker compose down            # Stop and remove containers
+docker compose logs -f ollama  # Follow Ollama logs
+docker compose ps              # List running services
 ```
 
 ## What's Included
@@ -91,10 +132,31 @@ The application is now running with:
 - **Backend (FastAPI)** - REST API with async PostgreSQL/MySQL support
 - **Frontend (React + Vite)** - Modern UI with query builder and history
 - **AI Service (Docker Ollama)** - Local llama3.2 model for SQL generation
-- **Database (PostgreSQL)** - Test database with sample data
-- **Docker Compose** - Complete orchestration for all services
+- **Database (PostgreSQL)** - Development database for testing
+- **Docker Compose** - Complete orchestration for all services with persistent volumes
 
 ## Configuration
+
+### Docker Compose Services
+
+The `docker-compose.yml` file defines two services with persistent storage:
+
+**Ollama Service:**
+- Container: `nlsql-ollama`
+- Image: `ollama/ollama:latest`
+- Port: `11434`
+- Volume: `ollama_data` (stores downloaded models)
+- Health check: Monitors API availability
+
+**PostgreSQL Service:**
+- Container: `nlsql-postgres`
+- Image: `postgres:16-alpine`
+- Port: `5432`
+- Volume: `postgres_data` (stores database files)
+- Credentials: user=`nlsql`, password=`nlsql_dev_password`, db=`nlsql`
+- Health check: Monitors database readiness
+
+Both services restart automatically unless explicitly stopped.
 
 ### Environment Variables (.env)
 
@@ -123,7 +185,7 @@ docker exec -it nlsql-ollama ollama pull codellama
 OLLAMA_MODEL=codellama
 
 # Restart app
-./run.sh stop && ./run.sh
+./run.sh stop && ./run.sh dev
 ```
 
 ### Available Models
@@ -182,17 +244,31 @@ curl -X POST http://localhost:8000/api/v1/query/sql \
 
 ## Security Features
 
+### Phase 1 Security Improvements (Implemented ✅)
+
+**Multi-Layer Protection:**
+- ✅ **SQL Injection Prevention** - 3-layer defense:
+  - SQL Sanitizer (dangerous pattern blocking)
+  - Identifier validation (table/column names)
+  - Parameterized queries
+- ✅ **Encrypted Credentials** - Fernet symmetric encryption for database passwords
+- ✅ **API Rate Limiting** - 60 requests/minute per IP (prevents DoS)
+- ✅ **Environment Validation** - Startup checks for Ollama, encryption keys, URLs
+- ✅ **Error Visibility** - Toast notifications for all errors and successes
+
 ### Write Operations
 - **Read-Only Mode** - Default safe mode, only SELECT queries
 - **Write Mode** - Enable DELETE, UPDATE, INSERT operations
 - **Auto-Commit** - All write operations commit automatically
 - **Error Handling** - Automatic transaction rollback on query errors
+- **User Warnings** - Toast notifications for dangerous operations
 
 ### SQL Protection
-- **Injection Prevention** - Blocks dangerous patterns
+- **Injection Prevention** - Multi-pattern blocking (DDL, comments, UNION, etc.)
 - **DDL Blocking** - No DROP, CREATE, ALTER operations
-- **Query Validation** - Syntax and safety checks
-- **Timeout Protection** - Prevents long-running queries
+- **Query Validation** - Syntax and safety checks via sqlparse
+- **Timeout Protection** - 30-second query timeout (prevents long-running queries)
+- **Rate Limiting** - Prevents API abuse and DoS attacks
 
 ### Security Warnings
 
@@ -200,11 +276,22 @@ curl -X POST http://localhost:8000/api/v1/query/sql \
 
 - **HTTPS Required in Production** - Database credentials are transmitted in API requests. Always use HTTPS when deploying to production to protect sensitive data.
 
-- **Credential Storage** - Database connection credentials are stored in plaintext in `~/.nlsql/databases.json`. Protect this file:
+- **Credential Storage** - Database connection credentials are **encrypted using Fernet** in `~/.nlsql/databases.json`. Protect your encryption key:
   ```bash
+  # Generate encryption key
+  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+  # Add to .env (never commit!)
+  DB_ENCRYPTION_KEY=<your_generated_key>
+
+  # Protect the databases file
   chmod 600 ~/.nlsql/databases.json
   ```
-  Consider using encrypted file systems or secrets management in production.
+
+  **Migration:** If upgrading from an older version, run:
+  ```bash
+  python scripts/migrate_encrypt_passwords.py
+  ```
 
 - **CORS Configuration** - Update `CORS_ORIGINS` environment variable for production domains. Never use `["*"]` in production - specify exact frontend URLs.
 
@@ -212,7 +299,9 @@ curl -X POST http://localhost:8000/api/v1/query/sql \
 
 - **Write Mode Caution** - Write mode enables UPDATE, DELETE, and INSERT operations. Always review generated SQL before execution in write mode. Changes are permanent once executed.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive security best practices.
+- **Rate Limiting** - API is rate limited to 60 requests/minute per IP. Adjust `API_RATE_LIMIT_PER_MINUTE` in `.env` if needed.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed security architecture and [DEPLOYMENT.md](DEPLOYMENT.md) for production best practices.
 
 ## Sample Data Context
 
@@ -247,11 +336,28 @@ curl http://localhost:8000/api/v1/databases
 
 ## Docker Services
 
+All services are managed via Docker Compose with persistent volumes for data.
+
 ### View Running Services
 ```bash
 docker ps
-# nlsql-ollama    - AI service (llama3.2)
-# nlsql-postgres  - PostgreSQL database
+# nlsql-ollama    - AI service (llama3.2) on port 11434
+# nlsql-postgres  - PostgreSQL database on port 5432
+```
+
+### Manage Services
+```bash
+# Start all services
+docker compose up -d
+
+# Stop all services
+docker compose stop
+
+# View service logs
+docker compose logs -f
+
+# Restart specific service
+docker compose restart ollama
 ```
 
 ### Manage Ollama
@@ -264,6 +370,9 @@ docker exec nlsql-ollama ollama list
 
 # Pull new model
 docker exec -it nlsql-ollama ollama pull llama3.1
+
+# Remove a model
+docker exec nlsql-ollama ollama rm llama3.2
 ```
 
 ### Manage PostgreSQL
@@ -272,7 +381,13 @@ docker exec -it nlsql-ollama ollama pull llama3.1
 docker logs nlsql-postgres
 
 # Connect to database
-docker exec -it nlsql-postgres psql -U readonly_user -d testdb
+docker exec -it nlsql-postgres psql -U nlsql -d nlsql
+
+# Backup database
+docker exec nlsql-postgres pg_dump -U nlsql nlsql > backup.sql
+
+# Restore database
+docker exec -i nlsql-postgres psql -U nlsql nlsql < backup.sql
 ```
 
 ## Project Structure
@@ -296,6 +411,7 @@ natural-lang-sql/
 │   └── package.json
 ├── docker-compose.yml           # Docker orchestration
 ├── run.sh                       # Unified management script
+├── install.sh                   # Unified installation script
 └── README.md                    # This file
 ```
 
@@ -362,7 +478,7 @@ docker ps | grep ollama
 docker logs nlsql-ollama
 
 # Restart
-docker-compose restart ollama
+docker compose restart ollama
 ```
 
 ### Database Connection Failed
@@ -371,7 +487,10 @@ docker-compose restart ollama
 docker logs nlsql-postgres
 
 # Test connection
-docker exec nlsql-postgres pg_isready -U readonly_user -d testdb
+docker exec nlsql-postgres pg_isready -U nlsql -d nlsql
+
+# Verify service is running
+docker compose ps
 ```
 
 ### Port Already in Use
@@ -385,8 +504,8 @@ lsof -ti:3000 | xargs kill -9
 
 ### Clean Start
 ```bash
-./run.sh clean   # Remove all containers and cache
-./run.sh         # Fresh start
+./run.sh clean      # Remove all containers and cache
+./run.sh dev        # Fresh start
 ```
 
 ## Contributing
@@ -408,8 +527,13 @@ This project is licensed under the GPL-3.0 License - see the LICENSE file for de
 - **React** - Frontend framework
 - **Docker** - Containerization platform
 
-## Related Documentation
+## Documentation
 
+**Project Documentation:**
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Detailed system architecture and design
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment guide
+
+**External Resources:**
 - [FastAPI Documentation](https://fastapi.tiangolo.com)
 - [Ollama Documentation](https://github.com/ollama/ollama)
 - [React Documentation](https://react.dev)

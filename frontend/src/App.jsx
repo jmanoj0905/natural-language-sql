@@ -6,10 +6,12 @@ import QueryHistory from './components/QueryHistory'
 import DatabaseStatus from './components/DatabaseStatus'
 import DatabaseConnectionManager from './components/DatabaseConnectionManager'
 import DatabaseOverview from './components/DatabaseOverview'
+import { useToast } from './hooks/useToast.jsx'
 
 const API_BASE = '/api/v1'
 
 function App() {
+  const { showError, showSuccess, showWarning } = useToast()
   const [activeTab, setActiveTab] = useState('query')
   const [queryHistory, setQueryHistory] = useState([])
   const [dbHealth, setDbHealth] = useState(null)
@@ -40,7 +42,8 @@ function App() {
       setDatabases(response.data.databases)
       setDefaultDatabaseId(response.data.default_database_id)
     } catch (error) {
-      // Silent fail - databases will show as empty
+      console.error('Failed to load databases:', error)
+      showError(error.response?.data?.detail || 'Failed to load databases')
     }
   }
 
@@ -50,6 +53,7 @@ function App() {
       setDbHealth(response.data)
     } catch (error) {
       setDbHealth({ database_configured: false, database_connected: false })
+      console.error('Database health check failed:', error)
     }
   }
 

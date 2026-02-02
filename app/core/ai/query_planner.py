@@ -1,0 +1,338 @@
+"""Intelligent query planner for complex multi-step operations."""
+
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+import re
+
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class QueryStep:
+    """Represents a single query step in a multi-query plan."""
+    sql: str
+    explanation: str
+    step_number: int
+    depends_on_previous: bool = False
+    check_existence: bool = False  # If True, check if entity exists before executing
+
+
+@dataclass
+class QueryPlan:
+    """Represents a complete query execution plan."""
+    steps: List[QueryStep]
+    original_question: str
+    requires_dependency_resolution: bool = False
+
+
+class IntelligentQueryPlanner:
+    """
+    Analyzes complex user requests and breaks them into multiple sequential queries.
+
+    Features:
+    - Dependency resolution: Auto-create missing entities before creating relationships
+    - Multi-query decomposition: Break complex requests into manageable steps
+    - Existence checks: Verify entities exist before operations
+    """
+
+    def __init__(self):
+        """Initialize the query planner."""
+        self.logger = get_logger(__name__)
+
+    def analyze_request(self, question: str, schema_context: str) -> Dict[str, Any]:
+        """
+        Analyze user request to determine if it requires multi-query planning.
+
+        Args:
+            question: Natural language request
+            schema_context: Database schema information
+
+        Returns:
+            Dict with analysis results
+        """
+        question_lower = question.lower()
+
+        # Patterns that indicate dependency resolution is needed
+        dependency_patterns = [
+            r'(\w+)\s+has\s+bought\s+(\w+)',  # "user b has bought item a"
+            r'(\w+)\s+purchased\s+(\w+)',
+            r'add\s+order\s+for\s+(\w+)',
+            r'create\s+purchase\s+.*?\s+for\s+(\w+)',
+            r'assign\s+(\w+)\s+to\s+(\w+)',
+        ]
+
+        # Patterns that indicate multiple operations
+        multi_operation_patterns = [
+            r'and\s+(add|create|update|delete)',  # "add user and create order"
+            r'then\s+(add|create|update|delete)',  # "create user then add order"
+            r',\s*(add|create|update|delete)',  # "add user, create order"
+        ]
+
+        requires_dependency_resolution = any(
+            re.search(pattern, question_lower) for pattern in dependency_patterns
+        )
+
+        requires_multi_query = any(
+            re.search(pattern, question_lower) for pattern in multi_operation_patterns
+        )
+
+        # Extract entity references (users, items, products, etc.)
+        entities = self._extract_entities(question, schema_context)
+
+        return {
+            "requires_dependency_resolution": requires_dependency_resolution,
+            "requires_multi_query": requires_multi_query or requires_dependency_resolution,
+            "entities": entities,
+            "complexity": "complex" if (requires_dependency_resolution or requires_multi_query) else "simple"
+        }
+
+    def _extract_entities(self, question: str, schema_context: str) -> List[Dict[str, str]]:
+        """
+        Extract entity references from the question.
+
+        Args:
+            question: Natural language request
+            schema_context: Database schema information
+
+        Returns:
+            List of entity dictionaries with type and identifier
+        """
+        entities = []
+        question_lower = question.lower()
+
+        # Extract table names from schema
+        table_pattern = r'Table:\s+(\w+)'
+        tables = re.findall(table_pattern, schema_context)
+
+        # Common entity patterns
+        for table in tables:
+            # Pattern: "user john" or "item apple"
+            singular = table.rstrip('s')  # Simple singularization
+            pattern = rf'\b{singular}\s+(\w+)'
+            matches = re.findall(pattern, question_lower)
+
+            for match in matches:
+                entities.append({
+                    "type": table,
+                    "identifier": match,
+                    "table": table
+                })
+
+        self.logger.debug("extracted_entities", entities=entities, question=question[:100])
+        return entities
+
+    def create_dependency_resolution_plan(
+        self,
+        question: str,
+        schema_context: str,
+        ai_generated_sql: str,
+        ai_explanation: str
+    ) -> QueryPlan:
+        """
+        Create a multi-step query plan with dependency resolution.
+
+        This handles cases like "user b has bought item a" where:
+        1. Check if user b exists, if not create it
+        2. Check if item a exists, if not create it
+        3. Create the purchase relationship
+
+        Args:
+            question: Original user request
+            schema_context: Database schema
+            ai_generated_sql: The main SQL generated by AI
+            ai_explanation: AI's explanation
+
+        Returns:
+            QueryPlan with multiple steps
+        """
+        analysis = self.analyze_request(question, schema_context)
+
+        if not analysis["requires_dependency_resolution"]:
+            # Simple case - just return the single query
+            return QueryPlan(
+                steps=[QueryStep(
+                    sql=ai_generated_sql,
+                    explanation=ai_explanation,
+                    step_number=1
+                )],
+                original_question=question,
+                requires_dependency_resolution=False
+            )
+
+        # Complex case - build multi-step plan
+        steps = []
+        step_num = 1
+
+        # Extract entities from the question
+        entities = analysis["entities"]
+
+        # For each entity, create existence check + conditional insert
+        for entity in entities:
+            table = entity["table"]
+            identifier = entity["identifier"]
+
+            # Generate existence check query
+            check_sql = self._generate_existence_check(table, identifier, schema_context)
+            if check_sql:
+                steps.append(QueryStep(
+                    sql=check_sql,
+                    explanation=f"Check if {entity['type']} '{identifier}' exists",
+                    step_number=step_num,
+                    check_existence=True
+                ))
+                step_num += 1
+
+            # Generate conditional insert (will be executed only if entity doesn't exist)
+            insert_sql = self._generate_entity_insert(table, identifier, schema_context)
+            if insert_sql:
+                steps.append(QueryStep(
+                    sql=insert_sql,
+                    explanation=f"Create {entity['type']} '{identifier}' if it doesn't exist",
+                    step_number=step_num,
+                    depends_on_previous=True
+                ))
+                step_num += 1
+
+        # Add the main relationship-creating query
+        steps.append(QueryStep(
+            sql=ai_generated_sql,
+            explanation=ai_explanation or "Create the relationship",
+            step_number=step_num,
+            depends_on_previous=True
+        ))
+
+        return QueryPlan(
+            steps=steps,
+            original_question=question,
+            requires_dependency_resolution=True
+        )
+
+    def _generate_existence_check(
+        self,
+        table: str,
+        identifier: str,
+        schema_context: str
+    ) -> Optional[str]:
+        """
+        Generate a query to check if an entity exists.
+
+        Args:
+            table: Table name
+            identifier: Entity identifier (e.g., username, product name)
+            schema_context: Database schema
+
+        Returns:
+            SQL query to check existence
+        """
+        # Determine the primary identifier column
+        # Common patterns: username for users, name/title for items, email for contacts
+        id_column = self._guess_identifier_column(table, schema_context)
+
+        if not id_column:
+            return None
+
+        return f"SELECT COUNT(*) FROM {table} WHERE {id_column} = '{identifier}'"
+
+    def _generate_entity_insert(
+        self,
+        table: str,
+        identifier: str,
+        schema_context: str
+    ) -> Optional[str]:
+        """
+        Generate an INSERT statement for a missing entity.
+
+        Args:
+            table: Table name
+            identifier: Entity identifier
+            schema_context: Database schema
+
+        Returns:
+            INSERT SQL statement
+        """
+        id_column = self._guess_identifier_column(table, schema_context)
+
+        if not id_column:
+            return None
+
+        # Generate minimal INSERT with just the identifier
+        return f"INSERT INTO {table} ({id_column}) VALUES ('{identifier}')"
+
+    def _guess_identifier_column(self, table: str, schema_context: str) -> Optional[str]:
+        """
+        Guess the primary identifier column for a table.
+
+        Args:
+            table: Table name
+            schema_context: Database schema
+
+        Returns:
+            Column name or None
+        """
+        # Extract column info for this table from schema
+        table_pattern = rf'Table:\s+{table}.*?Columns:\s+(.*?)(?=\n\s*Table:|$)'
+        match = re.search(table_pattern, schema_context, re.DOTALL)
+
+        if not match:
+            return None
+
+        columns_str = match.group(1)
+
+        # Priority order for identifier columns
+        identifier_candidates = [
+            'username', 'user_name', 'name', 'title',
+            'email', 'product_name', 'item_name', 'id'
+        ]
+
+        for candidate in identifier_candidates:
+            if candidate in columns_str.lower():
+                # Extract the actual column name (case-sensitive)
+                col_pattern = rf'(\w*{candidate}\w*)\s+\w+'
+                col_match = re.search(col_pattern, columns_str, re.IGNORECASE)
+                if col_match:
+                    return col_match.group(1)
+
+        return None
+
+    def decompose_complex_query(
+        self,
+        question: str,
+        schema_context: str
+    ) -> List[str]:
+        """
+        Break a complex multi-operation request into individual queries.
+
+        Examples:
+        - "add user john and create order for john" → 2 queries
+        - "update user email, then add order" → 2 queries
+
+        Args:
+            question: Complex user request
+            schema_context: Database schema
+
+        Returns:
+            List of individual natural language sub-requests
+        """
+        # Split on common conjunctions
+        separators = [
+            r'\s+and\s+then\s+',
+            r'\s+then\s+',
+            r'\s+and\s+',
+            r',\s+and\s+',
+            r';\s*',
+        ]
+
+        parts = [question]
+        for separator in separators:
+            new_parts = []
+            for part in parts:
+                new_parts.extend(re.split(separator, part, flags=re.IGNORECASE))
+            parts = new_parts
+
+        # Filter out empty parts
+        parts = [p.strip() for p in parts if p.strip()]
+
+        self.logger.info("decomposed_query", original=question[:100], sub_queries=len(parts))
+        return parts

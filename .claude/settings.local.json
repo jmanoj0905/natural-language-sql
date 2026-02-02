@@ -34,7 +34,10 @@
       "Bash([ -f .gitignore ])",
       "Bash(npx wrangler:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(docker compose config:*)",
+      "Bash(./run.sh:*)",
+      "Bash(python:*)"
     ]
   }
 }

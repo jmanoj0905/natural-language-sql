@@ -79,12 +79,32 @@ class ExecutionResult(BaseModel):
     )
 
 
+class QueryStep(BaseModel):
+    """Represents a single query step in a multi-query plan."""
+
+    step_number: int = Field(..., description="Step number in the execution sequence")
+    sql: str = Field(..., description="SQL query for this step")
+    explanation: str = Field(..., description="Explanation of what this step does")
+    execution_result: Optional[ExecutionResult] = Field(
+        None,
+        description="Execution results for this step (if executed)"
+    )
+    skipped: bool = Field(
+        default=False,
+        description="Whether this step was skipped (e.g., entity already exists)"
+    )
+    skip_reason: Optional[str] = Field(
+        None,
+        description="Reason for skipping this step"
+    )
+
+
 class QueryResponse(BaseModel):
     """Response for natural language query."""
 
     success: bool = Field(..., description="Whether the request was successful")
     question: str = Field(..., description="Original natural language question")
-    generated_sql: str = Field(..., description="Generated SQL query")
+    generated_sql: str = Field(..., description="Generated SQL query (primary or combined)")
     sql_explanation: str = Field(..., description="Explanation of the SQL query")
     execution_result: Optional[ExecutionResult] = Field(
         None,
@@ -97,6 +117,15 @@ class QueryResponse(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata (model, timestamp, etc.)"
+    )
+    # Multi-query support
+    query_steps: Optional[List[QueryStep]] = Field(
+        None,
+        description="Multiple query steps for complex operations (if applicable)"
+    )
+    is_multi_query: bool = Field(
+        default=False,
+        description="Whether this response contains multiple queries"
     )
 
     class Config:

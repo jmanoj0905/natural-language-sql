@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.config import get_settings
 from app.api.v1.router import api_router
@@ -11,6 +13,7 @@ from app.core.database.connection_manager import get_db_manager
 from app.models.database import DatabaseConfig
 from app.exceptions import NLSQLException
 from app.utils.logger import get_logger, configure_logging
+from app.middleware.rate_limiter import limiter
 
 # Configure logging
 configure_logging()
@@ -34,8 +37,48 @@ async def lifespan(app: FastAPI):
         "application_starting",
         version=settings.API_VERSION,
         environment=settings.ENVIRONMENT,
-        debug=settings.DEBUG
+        debug=settings.DEBUG,
+        ollama_url=settings.OLLAMA_BASE_URL,
+        ollama_model=settings.OLLAMA_MODEL
     )
+
+    # Verify Ollama is reachable
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                model_names = [m.get("name") for m in models]
+                logger.info(
+                    "ollama_connection_verified",
+                    available_models=model_names,
+                    configured_model=settings.OLLAMA_MODEL
+                )
+
+                # Check if configured model is available
+                if settings.OLLAMA_MODEL not in model_names:
+                    logger.warning(
+                        "configured_model_not_found",
+                        configured_model=settings.OLLAMA_MODEL,
+                        available_models=model_names,
+                        message=f"Configured model '{settings.OLLAMA_MODEL}' not found. "
+                        f"Pull it with: docker exec -it nlsql-ollama ollama pull {settings.OLLAMA_MODEL}"
+                    )
+            else:
+                logger.warning(
+                    "ollama_connection_issue",
+                    status_code=response.status_code,
+                    message="Ollama API responded with non-200 status"
+                )
+    except Exception as e:
+        logger.warning(
+            "ollama_not_reachable",
+            error=str(e),
+            url=settings.OLLAMA_BASE_URL,
+            message=f"Cannot connect to Ollama at {settings.OLLAMA_BASE_URL}. "
+            "Make sure Ollama is running. The API will not work without Ollama."
+        )
 
     # For MVP: Configure database from environment variables
     # In production, this could be done via API endpoint or config file
@@ -92,7 +135,13 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS
+# Add rate limiter to app state
+app.state.limiter = limiter
+
+# Add rate limit exception handler
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Configure CORS (must be before SlowAPI middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -100,6 +149,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Note: SlowAPI uses decorators, not middleware
+# Rate limiting is applied via app.state.limiter which is accessible to decorated endpoints
 
 
 # Global exception handler for NLSQLException
