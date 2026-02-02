@@ -529,10 +529,6 @@ This project is licensed under the GPL-3.0 License - see the LICENSE file for de
 
 ## Documentation
 
-**Project Documentation:**
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Detailed system architecture and design
-- [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment guide
-
 **External Resources:**
 - [FastAPI Documentation](https://fastapi.tiangolo.com)
 - [Ollama Documentation](https://github.com/ollama/ollama)
