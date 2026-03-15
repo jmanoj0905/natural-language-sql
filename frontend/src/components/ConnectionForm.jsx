@@ -1,294 +1,252 @@
-import {
-  Database,
-  Container,
-  Cloud,
-  CloudCog,
-  Waves,
-  Zap,
-  Train,
-  Palette,
-  CircleDot,
-  Globe,
-  Settings,
-  Server,
-  CheckCircle,
-  XCircle,
-  Loader2
-} from 'lucide-react'
-
-const ICON_COMPONENTS = {
-  database: Database,
-  docker: Container,
-  aws: Cloud,
-  gcp: CloudCog,
-  azure: Cloud,
-  digitalocean: Waves,
-  supabase: Zap,
-  railway: Train,
-  render: Palette,
-  heroku: CircleDot,
-  neon: Zap,
-  planetscale: Globe,
-  settings: Settings
-}
+import { useState } from 'react'
+import { getLabel } from '../data/providers'
 
 export default function ConnectionForm({
-  provider,
   formData,
-  onFormDataChange,
+  onChange,
+  onTest,
   onSave,
-  onCancel,
-  onChangeProvider,
-  testConnection,
-  testingConnection,
-  testResult
+  testResult,
+  testing,
+  saving,
+  isNew,
 }) {
-  const handleInputChange = (e) => {
+  const [showPassword, setShowPassword] = useState(false)
+
+  const handleChange = (e) => {
     const { name, value } = e.target
-    onFormDataChange(prev => ({
-      ...prev,
-      [name]: value
-    }))
+    onChange({ ...formData, [name]: name === 'port' ? Number(value) || '' : value })
   }
 
-  const isFieldDisabled = (fieldName) => {
-    // Disable pre-filled fields for localhost and docker providers
-    if (provider.config && provider.config[fieldName] !== undefined) {
-      return provider.id.includes('localhost') || provider.id.includes('docker')
-    }
-    return false
-  }
+  const canTest = formData.host && formData.database && formData.username
+  const canSave = canTest && (isNew ? formData.database_id?.trim() : true)
 
-  const providerHints = provider.hints || {}
-  const IconComponent = ICON_COMPONENTS[provider.icon] || Server
+  const title = isNew
+    ? `New ${getLabel(formData.db_type)} Connection`
+    : `Edit ${formData.nickname || formData.database_id}`
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          {/* Provider Header */}
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-            <div>
-              <h3 className="text-2xl font-bold text-gray-900">Connect to Database</h3>
-              <div className="flex items-center gap-2 mt-2">
-                <IconComponent size={20} className="text-blue-600" />
-                <p className="text-gray-600 font-medium">{provider.fullName}</p>
-              </div>
-            </div>
+    <div className="flex-1 overflow-y-auto p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-6">{title}</h2>
+
+      <div className="space-y-4 max-w-lg">
+        {/* Database ID — only shown for new connections */}
+        {isNew && (
+          <Field label="Database ID" required>
+            <input
+              type="text"
+              name="database_id"
+              value={formData.database_id}
+              onChange={handleChange}
+              placeholder="e.g., my-app-db"
+              className="input"
+            />
+            <p className="text-xs text-gray-500 mt-1">Unique identifier. Cannot be changed later.</p>
+          </Field>
+        )}
+
+        {/* Nickname */}
+        <Field label="Name" hint="(optional)">
+          <input
+            type="text"
+            name="nickname"
+            value={formData.nickname}
+            onChange={handleChange}
+            placeholder="Friendly display name"
+            className="input"
+          />
+        </Field>
+
+        {/* Type — read-only */}
+        <Field label="Type">
+          <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 font-medium text-sm">
+            {getLabel(formData.db_type)}
+          </div>
+        </Field>
+
+        {/* Host + Port */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="col-span-2">
+            <Field label="Host" required>
+              <input
+                type="text"
+                name="host"
+                value={formData.host}
+                onChange={handleChange}
+                placeholder="localhost"
+                className="input"
+              />
+            </Field>
+          </div>
+          <Field label="Port" required>
+            <input
+              type="number"
+              name="port"
+              value={formData.port}
+              onChange={handleChange}
+              className="input"
+            />
+          </Field>
+        </div>
+
+        {/* Database */}
+        <Field label="Database" required>
+          <input
+            type="text"
+            name="database"
+            value={formData.database}
+            onChange={handleChange}
+            placeholder="Enter database name"
+            className="input"
+          />
+        </Field>
+
+        {/* Username */}
+        <Field label="User" required>
+          <input
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            placeholder="Enter username"
+            className="input"
+          />
+        </Field>
+
+        {/* Password */}
+        <Field label="Password" required={isNew}>
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder={isNew ? 'Enter password' : 'Leave blank to keep current'}
+              className="input pr-10"
+            />
             <button
-              onClick={onChangeProvider}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium px-4 py-2 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
-              Change Provider
+              {showPassword ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              )}
             </button>
           </div>
+        </Field>
 
-          {/* Info Box */}
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <span className="font-semibold">Auto-configured for {provider.name}:</span> Some fields have been pre-filled based on your provider selection. You only need to fill in your credentials and database details.
-            </p>
-          </div>
-
-          {/* Form Fields */}
-          <div className="space-y-4">
-            {/* Database ID */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Database ID <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="database_id"
-                value={formData.database_id}
-                onChange={handleInputChange}
-                placeholder="e.g., prod-db, dev-db, my-app-db"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <p className="text-xs text-gray-500 mt-1">Unique identifier for this database connection</p>
-            </div>
-
-            {/* Nickname */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nickname (Optional)
-              </label>
-              <input
-                type="text"
-                name="nickname"
-                value={formData.nickname}
-                onChange={handleInputChange}
-                placeholder="e.g., Production Database, Dev Server"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* Host and Port */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Host <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  name="host"
-                  value={formData.host}
-                  onChange={handleInputChange}
-                  placeholder={providerHints.host || 'e.g., localhost'}
-                  disabled={isFieldDisabled('host')}
-                  className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    isFieldDisabled('host') ? 'bg-gray-100 cursor-not-allowed' : ''
-                  }`}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Port <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  name="port"
-                  value={formData.port}
-                  onChange={handleInputChange}
-                  disabled={isFieldDisabled('port')}
-                  className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    isFieldDisabled('port') ? 'bg-gray-100 cursor-not-allowed' : ''
-                  }`}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Database Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Database Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="database"
-                value={formData.database}
-                onChange={handleInputChange}
-                placeholder={providerHints.database || 'Enter database name'}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* Username */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                name="username"
-                value={formData.username}
-                onChange={handleInputChange}
-                placeholder={providerHints.username || 'Enter username'}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* Password */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Password <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleInputChange}
-                placeholder={providerHints.password || 'Enter password'}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* SSL Mode */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                SSL Mode
-              </label>
-              <select
-                name="ssl_mode"
-                value={formData.ssl_mode}
-                onChange={handleInputChange}
-                disabled={isFieldDisabled('ssl_mode')}
-                className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  isFieldDisabled('ssl_mode') ? 'bg-gray-100 cursor-not-allowed' : ''
-                }`}
-              >
-                <option value="disable">Disable</option>
-                <option value="prefer">Prefer</option>
-                <option value="require">Require</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Test Connection Button */}
-          <button
-            onClick={testConnection}
-            disabled={testingConnection || !formData.database_id || !formData.database}
-            className="w-full mt-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+        {/* SSL Mode */}
+        <Field label="SSL Mode">
+          <select
+            name="ssl_mode"
+            value={formData.ssl_mode}
+            onChange={handleChange}
+            className="input"
           >
-            {testingConnection ? (
-              <span className="flex items-center justify-center gap-2">
-                <Loader2 size={20} className="animate-spin" />
-                Testing Connection...
+            <option value="disable">Disable</option>
+            <option value="prefer">Prefer</option>
+            <option value="require">Require</option>
+          </select>
+        </Field>
+
+        {/* Test result box */}
+        {testResult && (
+          <div className={`p-3 rounded-lg border text-sm ${
+            testResult.success
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}>
+            <div className="flex items-start gap-2">
+              {testResult.success ? (
+                <svg className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 mt-0.5 flex-shrink-0 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              )}
+              <div>
+                <p className="font-medium">
+                  {testResult.success ? 'Connection successful!' : 'Connection failed'}
+                </p>
+                {testResult.success && testResult.info && (
+                  <p className="text-xs mt-1 opacity-80">
+                    {testResult.info.version?.split(' ').slice(0, 2).join(' ')} &mdash; {testResult.info.size}
+                  </p>
+                )}
+                {!testResult.success && testResult.error && (
+                  <p className="text-xs mt-1">{testResult.error}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={!canTest || testing}
+            className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {testing ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Testing...
               </span>
             ) : (
               'Test Connection'
             )}
           </button>
-
-          {/* Test Result */}
-          {testResult && (
-            <div className={`mt-4 p-4 rounded-lg border ${
-              testResult.success
-                ? 'bg-green-50 border-green-200 text-green-800'
-                : 'bg-red-50 border-red-200 text-red-800'
-            }`}>
-              <div className="flex items-start gap-3">
-                {testResult.success ? (
-                  <CheckCircle size={20} className="mt-0.5 flex-shrink-0" />
-                ) : (
-                  <XCircle size={20} className="mt-0.5 flex-shrink-0" />
-                )}
-                <div>
-                  <p className="font-medium">
-                    {testResult.success ? 'Connection successful!' : 'Connection failed'}
-                  </p>
-                  {!testResult.success && testResult.error && (
-                    <p className="text-sm mt-1">{testResult.error}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div className="flex gap-3 mt-6">
-            <button
-              onClick={onSave}
-              disabled={!formData.database_id || !formData.database}
-              className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
-            >
-              Save Database
-            </button>
-            <button
-              onClick={onCancel}
-              className="flex-1 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!canSave || saving}
+            className="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Saving...
+              </span>
+            ) : isNew ? (
+              'Save'
+            ) : (
+              'Update'
+            )}
+          </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Small helper for consistent field labels
+function Field({ label, required, hint, children }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {hint && <span className="text-gray-400 ml-1 font-normal">{hint}</span>}
+      </label>
+      {children}
     </div>
   )
 }

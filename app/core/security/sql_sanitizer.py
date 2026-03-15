@@ -19,36 +19,19 @@ class SQLSanitizer:
     3. Multiple statement detection
     """
 
-    # Dangerous patterns that indicate SQL injection or unauthorized operations
+    # Dangerous patterns — pre-compiled once at class definition time.
     BLOCKED_PATTERNS = [
-        # DDL Operations
-        (r'\b(DROP|CREATE|ALTER|TRUNCATE|RENAME)\s+', "DDL operation"),
-
-        # System commands
-        (r'\b(EXECUTE|EXEC|xp_cmdshell|sp_executesql)\s*\(', "System command"),
-
-        # SQL comments (potential injection vector)
-        (r'--', "SQL comment"),
-        (r'/\*.*?\*/', "Multi-line comment"),
-
-        # Multiple statements (using semicolon)
-        (r';\s*\w+', "Multiple statements"),
-
-        # UNION-based injection (except UNION in subqueries within SELECT)
-        (r'UNION\s+(?:ALL\s+)?SELECT(?!\s+.*\s+FROM\s+\()', "UNION injection"),
-
-        # Information schema access (can leak schema info)
-        (r'\binformation_schema\b', "Information schema access"),
-
-        # PostgreSQL-specific dangerous functions
-        (r'\b(pg_read_file|pg_ls_dir|pg_sleep|lo_import|lo_export)\s*\(', "PostgreSQL dangerous function"),
-
-        # MySQL-specific dangerous functions
-        (r'\b(LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b', "MySQL dangerous function"),
-
-        # Encoded characters (hex, unicode) - potential obfuscation
-        (r'0x[0-9a-fA-F]+', "Hex encoding"),
-        (r'\\u[0-9a-fA-F]{4}', "Unicode encoding"),
+        (re.compile(r'\b(DROP|CREATE|ALTER|TRUNCATE|RENAME)\s+', re.IGNORECASE), "DDL operation"),
+        (re.compile(r'\b(EXECUTE|EXEC|xp_cmdshell|sp_executesql)\s*\(', re.IGNORECASE), "System command"),
+        (re.compile(r'--'), "SQL comment"),
+        (re.compile(r'/\*.*?\*/'), "Multi-line comment"),
+        (re.compile(r';\s*\w+'), "Multiple statements"),
+        (re.compile(r'UNION\s+(?:ALL\s+)?SELECT(?!\s+.*\s+FROM\s+\()', re.IGNORECASE), "UNION injection"),
+        (re.compile(r'\binformation_schema\b', re.IGNORECASE), "Information schema access"),
+        (re.compile(r'\b(pg_read_file|pg_ls_dir|pg_sleep|lo_import|lo_export)\s*\(', re.IGNORECASE), "PostgreSQL dangerous function"),
+        (re.compile(r'\b(LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b', re.IGNORECASE), "MySQL dangerous function"),
+        (re.compile(r'0x[0-9a-fA-F]+'), "Hex encoding"),
+        (re.compile(r'\\u[0-9a-fA-F]{4}'), "Unicode encoding"),
     ]
 
     @classmethod
@@ -78,7 +61,7 @@ class SQLSanitizer:
         ]
 
         # Check each blocked pattern
-        for pattern, description in cls.BLOCKED_PATTERNS:
+        for compiled_pattern, description in cls.BLOCKED_PATTERNS:
             # Skip DML check if write operations are allowed
             if allow_write and description == "DML operation":
                 continue
@@ -87,7 +70,7 @@ class SQLSanitizer:
             if not strict_mode and description in lenient_patterns:
                 continue
 
-            if re.search(pattern, normalized_sql, re.IGNORECASE):
+            if compiled_pattern.search(normalized_sql):
                 violations.append(f"Blocked pattern detected: {description}")
 
         # Log security event if violations found
@@ -124,6 +107,9 @@ class SQLSanitizer:
                 pattern=violations[0] if violations else None
             )
 
+    _SINGLE_LINE_COMMENT = re.compile(r'--.*?(\n|$)')
+    _MULTI_LINE_COMMENT = re.compile(r'/\*.*?\*/', re.DOTALL)
+
     @classmethod
     def strip_comments(cls, sql: str) -> str:
         """
@@ -135,13 +121,8 @@ class SQLSanitizer:
         Returns:
             SQL with comments removed
         """
-        # Remove single-line comments
-        sql = re.sub(r'--.*?(\n|$)', ' ', sql)
-
-        # Remove multi-line comments
-        sql = re.sub(r'/\*.*?\*/', ' ', sql, flags=re.DOTALL)
-
-        # Clean up extra whitespace
+        sql = cls._SINGLE_LINE_COMMENT.sub(' ', sql)
+        sql = cls._MULTI_LINE_COMMENT.sub(' ', sql)
         sql = " ".join(sql.split())
 
         return sql

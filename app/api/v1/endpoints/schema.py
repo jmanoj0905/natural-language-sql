@@ -66,24 +66,38 @@ async def get_database_schema(
             )
 
             # Also get primary keys for each table
+            db_config = get_db_manager().get_database_config(target_db_id)
+            is_mysql = db_config.db_type == "mysql"
+
             enhanced_tables = []
             for table in tables_info:
                 table_name = table["name"]
 
-                # Query for primary keys
-                pk_query = """
-                    SELECT a.attname
-                    FROM pg_index i
-                    JOIN pg_attribute a ON a.attrelid = i.indrelid
-                        AND a.attnum = ANY(i.indkey)
-                    WHERE i.indrelid = :table_name::regclass
-                        AND i.indisprimary
-                """
+                # Query for primary keys — branch on database type
+                if is_mysql:
+                    pk_query = """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.KEY_COLUMN_USAGE
+                        WHERE TABLE_SCHEMA = :schema_name
+                          AND TABLE_NAME = :table_name
+                          AND CONSTRAINT_NAME = 'PRIMARY'
+                    """
+                    pk_params = {"schema_name": db_config.database, "table_name": table_name}
+                else:
+                    pk_query = """
+                        SELECT a.attname
+                        FROM pg_index i
+                        JOIN pg_attribute a ON a.attrelid = i.indrelid
+                            AND a.attnum = ANY(i.indkey)
+                        WHERE i.indrelid = :table_name::regclass
+                            AND i.indisprimary
+                    """
+                    pk_params = {"table_name": table_name}
 
                 try:
                     result = await conn.execute(
                         text(pk_query),
-                        {"table_name": table_name}
+                        pk_params
                     )
                     primary_keys = [row[0] for row in result.fetchall()]
 

@@ -10,6 +10,7 @@ from app.core.ai.prompts import (
     extract_explanation_from_response
 )
 from app.core.database.schema_inspector import SchemaInspector
+from app.core.database.connection_manager import get_db_manager
 from app.config import get_settings
 from app.exceptions import AIAPIError, AIParseError
 from app.utils.logger import get_logger, log_ai_request
@@ -18,18 +19,9 @@ logger = get_logger(__name__)
 
 
 class SQLGenerator:
-    """
-    SQL generation using Ollama local AI.
-
-    Benefits:
-    - Completely FREE
-    - No API keys
-    - Runs locally
-    - Privacy-friendly
-    """
+    """SQL generation using Ollama local AI."""
 
     def __init__(self):
-        """Initialize SQL generator with Ollama."""
         self.settings = get_settings()
         self.ai_client = get_ollama_client()
         self.schema_inspector = SchemaInspector()
@@ -38,43 +30,48 @@ class SQLGenerator:
         self,
         question: str,
         connection: AsyncConnection,
-        include_schema: bool = True,
-        read_only: bool = True,
-        db_id: str = "default"
+        db_id: str = "default",
+        read_only: bool = True
     ) -> Tuple[str, str]:
-        """Generate SQL query from natural language using Ollama."""
-        try:
-            # Get schema context with sample data
-            schema_context = ""
-            if include_schema:
-                schema_context = await self.schema_inspector.get_schema_summary(
-                    connection,
-                    db_id=db_id,
-                    max_tables=20,
-                    include_sample_data=True,
-                    sample_rows=3
-                )
-                logger.debug("schema_context_retrieved_with_samples")
+        """
+        Generate SQL from natural language using Ollama.
 
-            # Build prompt
+        Args:
+            question: Natural language question
+            connection: Database connection for schema introspection
+            db_id: Database identifier
+            read_only: Only used to hint the prompt (SELECT-only vs any SQL)
+
+        Returns:
+            Tuple of (sql, explanation)
+        """
+        try:
+            # Get full schema context — all tables, all columns, sample data
+            schema_context = await self.schema_inspector.get_schema_summary(
+                connection,
+                db_id=db_id,
+                max_tables=50,
+                include_sample_data=True,
+                sample_rows=3
+            )
+
+            try:
+                db_config = get_db_manager().get_database_config(db_id)
+                raw_type = db_config.db_type.lower()
+                database_type = "MySQL" if raw_type == "mysql" else "PostgreSQL"
+            except Exception:
+                database_type = "PostgreSQL"
+
             prompt = build_sql_generation_prompt(
                 question=question,
                 schema_context=schema_context,
-                database_type="PostgreSQL",
+                database_type=database_type,
                 max_limit=self.settings.MAX_QUERY_RESULTS,
                 read_only=read_only
             )
 
-            logger.debug(
-                "prompt_built",
-                question=question[:100],
-                prompt_length=len(prompt)
-            )
-
-            # Call Ollama
             response = await self.ai_client.generate_content(prompt)
 
-            # Log request
             log_ai_request(
                 logger,
                 question=question,
@@ -82,7 +79,6 @@ class SQLGenerator:
                 success=True
             )
 
-            # Extract SQL and explanation
             sql = extract_sql_from_response(response)
 
             if not sql:
@@ -120,18 +116,3 @@ class SQLGenerator:
                 question=question[:100]
             )
             raise AIAPIError(f"SQL generation failed: {str(e)}")
-
-    async def generate_and_explain(
-        self,
-        question: str,
-        connection: AsyncConnection
-    ) -> dict:
-        """Generate SQL with detailed response."""
-        sql, explanation = await self.generate_sql(question, connection)
-
-        return {
-            "sql": sql,
-            "explanation": explanation,
-            "model": self.settings.OLLAMA_MODEL,
-            "temperature": self.settings.OLLAMA_TEMPERATURE
-        }

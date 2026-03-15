@@ -11,23 +11,9 @@ class QueryOptions(BaseModel):
         default=True,
         description="Whether to execute the query after generation"
     )
-    include_schema_context: bool = Field(
-        default=True,
-        description="Whether to include schema information in prompt"
-    )
     read_only: bool = Field(
-        default=False,
-        description="If True, only SELECT queries allowed. If False, allows write operations (UPDATE, DELETE, INSERT)"
-    )
-    limit: Optional[int] = Field(
-        default=None,
-        description="Maximum number of results (overrides default)",
-        ge=1,
-        le=1000
-    )
-    confirm_delete: bool = Field(
         default=True,
-        description="Confirmation flag for DELETE operations"
+        description="If True, only SELECT queries allowed. The UI checkbox controls this."
     )
 
 
@@ -51,8 +37,7 @@ class NaturalLanguageQueryRequest(BaseModel):
                 "question": "Show me all users who signed up in the last 7 days",
                 "options": {
                     "execute": True,
-                    "include_schema_context": True,
-                    "limit": 100
+                    "read_only": True
                 }
             }
         }
@@ -79,33 +64,13 @@ class ExecutionResult(BaseModel):
     )
 
 
-class QueryStep(BaseModel):
-    """Represents a single query step in a multi-query plan."""
-
-    step_number: int = Field(..., description="Step number in the execution sequence")
-    sql: str = Field(..., description="SQL query for this step")
-    explanation: str = Field(..., description="Explanation of what this step does")
-    execution_result: Optional[ExecutionResult] = Field(
-        None,
-        description="Execution results for this step (if executed)"
-    )
-    skipped: bool = Field(
-        default=False,
-        description="Whether this step was skipped (e.g., entity already exists)"
-    )
-    skip_reason: Optional[str] = Field(
-        None,
-        description="Reason for skipping this step"
-    )
-
-
 class QueryResponse(BaseModel):
     """Response for natural language query."""
 
     success: bool = Field(..., description="Whether the request was successful")
     question: str = Field(..., description="Original natural language question")
-    generated_sql: str = Field(..., description="Generated SQL query (primary or combined)")
-    sql_explanation: str = Field(..., description="Explanation of the SQL query")
+    generated_sql: str = Field(default="", description="Generated SQL query")
+    sql_explanation: str = Field(default="", description="Explanation of the SQL query")
     execution_result: Optional[ExecutionResult] = Field(
         None,
         description="Query execution results (if executed)"
@@ -116,16 +81,7 @@ class QueryResponse(BaseModel):
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional metadata (model, timestamp, etc.)"
-    )
-    # Multi-query support
-    query_steps: Optional[List[QueryStep]] = Field(
-        None,
-        description="Multiple query steps for complex operations (if applicable)"
-    )
-    is_multi_query: bool = Field(
-        default=False,
-        description="Whether this response contains multiple queries"
+        description="Additional metadata"
     )
 
     class Config:
@@ -137,10 +93,9 @@ class QueryResponse(BaseModel):
                 "sql_explanation": "This query retrieves all user records created within the past 7 days.",
                 "execution_result": {
                     "rows": [
-                        {"id": 1, "username": "john_doe", "created_at": "2026-01-23"},
-                        {"id": 2, "username": "jane_smith", "created_at": "2026-01-24"}
+                        {"id": 1, "username": "john_doe", "created_at": "2026-01-23"}
                     ],
-                    "row_count": 2,
+                    "row_count": 1,
                     "execution_time_ms": 23.5,
                     "columns": ["id", "username", "created_at"]
                 },
@@ -151,7 +106,6 @@ class QueryResponse(BaseModel):
                 }
             }
         }
-
 
 
 class DirectSQLRequest(BaseModel):
@@ -180,44 +134,3 @@ class ErrorResponse(BaseModel):
         ...,
         description="Error details"
     )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "success": False,
-                "error": {
-                    "code": "QUERY_VALIDATION_ERROR",
-                    "message": "Only SELECT queries are allowed",
-                    "details": {
-                        "detected_operation": "UPDATE"
-                    },
-                    "timestamp": "2026-01-29T10:30:00Z"
-                }
-            }
-        }
-
-
-class WriteConfirmationRequest(BaseModel):
-    """Confirmation request for write operation."""
-
-    user_id: int = Field(
-        ...,
-        description="ID of the user to delete"
-    )
-    operation_type: str = Field(
-        default="delete_user",
-        description="Type of write operation"
-    )
-    confirmed: bool = Field(
-        ...,
-        description="Whether the user has confirmed the operation"
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "user_id": 4,
-                "operation_type": "delete_user",
-                "confirmed": True
-            }
-        }

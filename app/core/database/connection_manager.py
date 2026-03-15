@@ -1,4 +1,4 @@
-"""Database connection manager for PostgreSQL with async support."""
+"""Database connection manager for PostgreSQL and MySQL with async support."""
 
 import asyncio
 import json
@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Optional, Dict, List
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncConnection
-from sqlalchemy.pool import NullPool, QueuePool
 from sqlalchemy import text
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -24,9 +23,12 @@ DB_CONFIG_FILE = Path.home() / ".nlsql" / "databases.json"
 
 class DatabaseConnectionManager:
     """
-    Manages PostgreSQL database connections with async support.
+    Manages PostgreSQL and MySQL database connections with async support.
 
     Supports multiple database connections with unique identifiers.
+    Connection-URL construction and engine-specific queries are
+    delegated to the appropriate DatabaseAdapter via
+    ``app.core.database.adapters.get_adapter``.
     """
 
     def __init__(self):
@@ -208,34 +210,20 @@ class DatabaseConnectionManager:
 
     def _build_connection_string(self, config: DatabaseConfig) -> str:
         """
-        Build database connection string for asyncpg (PostgreSQL) or aiomysql (MySQL).
+        Build the async connection URL for the given database config.
+
+        All engine-specific logic (driver scheme, query-string params,
+        credential URL-encoding) is handled by the adapter returned by
+        ``get_adapter(config.db_type)``.
 
         Args:
             config: Database configuration
 
         Returns:
-            str: Connection string in appropriate format
+            str: Fully-formed async connection URL
         """
-        db_type = config.db_type.lower()
-
-        if db_type == "mysql":
-            # MySQL connection string
-            conn_str = (
-                f"mysql+aiomysql://{config.username}:{config.password}"
-                f"@{config.host}:{config.port}/{config.database}"
-            )
-            # MySQL doesn't use ssl_mode the same way, but we can add charset
-            conn_str += "?charset=utf8mb4"
-        else:
-            # PostgreSQL connection string (default)
-            conn_str = (
-                f"postgresql+asyncpg://{config.username}:{config.password}"
-                f"@{config.host}:{config.port}/{config.database}"
-            )
-            if config.ssl_mode:
-                conn_str += f"?ssl={config.ssl_mode}"
-
-        return conn_str
+        from app.core.database.adapters import get_adapter
+        return get_adapter(config.db_type).build_connection_url(config)
 
     @asynccontextmanager
     async def get_connection(self, db_id: Optional[str] = None) -> AsyncConnection:
@@ -265,14 +253,12 @@ class DatabaseConnectionManager:
                 details={"database_id": target_db_id}
             )
 
+        # Acquire the connection — only wrap *connection-level* errors,
+        # never exceptions raised by the caller inside the ``yield``.
         try:
             engine = self._engines[target_db_id]
-            async with engine.begin() as connection:
-                logger.debug("database_connection_acquired", database_id=target_db_id)
-                yield connection
-                # Transaction auto-commits on successful exit, rolls back on exception
-                logger.debug("database_connection_released", database_id=target_db_id)
-
+            conn_cm = engine.begin()
+            connection = await conn_cm.__aenter__()
         except Exception as e:
             logger.error(
                 "database_connection_failed",
@@ -284,6 +270,20 @@ class DatabaseConnectionManager:
                 f"Failed to connect to database '{target_db_id}': {str(e)}",
                 details={"database_id": target_db_id, "error_type": type(e).__name__}
             )
+
+        try:
+            logger.debug("database_connection_acquired", database_id=target_db_id)
+            yield connection
+            logger.debug("database_connection_released", database_id=target_db_id)
+        except BaseException:
+            # Roll back the transaction on any error from the caller,
+            # then let the original exception propagate unchanged.
+            import sys
+            await conn_cm.__aexit__(*sys.exc_info())
+            raise
+        else:
+            # Commit on clean exit.
+            await conn_cm.__aexit__(None, None, None)
 
     def list_databases(self) -> List[str]:
         """

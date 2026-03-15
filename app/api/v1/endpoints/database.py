@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 
 from app.core.database.connection_manager import get_db_manager
+from app.core.database.adapters import get_adapter
 from app.models.database import DatabaseConfig, DatabaseInfo, DatabaseListResponse
 from app.utils.logger import get_logger
 from sqlalchemy import text
@@ -40,17 +41,6 @@ class DatabaseConfigRequest(BaseModel):
         }
 
 
-class DatabaseInfoResponse(BaseModel):
-    """Response model for database information."""
-
-    database_id: str
-    host: str
-    port: int
-    database: str
-    username: str
-    ssl_mode: str
-    is_connected: bool
-
 
 @router.post("", response_model=Dict[str, Any])
 async def register_database(config: DatabaseConfigRequest):
@@ -73,6 +63,16 @@ async def register_database(config: DatabaseConfigRequest):
     try:
         db_manager = get_db_manager()
 
+        # Reject empty database_id — would poison the persisted config
+        if not config.database_id or not config.database_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Database ID cannot be empty",
+                    "code": "INVALID_DATABASE_ID"
+                }
+            )
+
         # Check if database_id already exists
         if config.database_id in db_manager.list_databases():
             raise HTTPException(
@@ -87,6 +87,7 @@ async def register_database(config: DatabaseConfigRequest):
         db_config = DatabaseConfig(
             database_id=config.database_id,
             nickname=config.nickname,
+            db_type=config.db_type,
             host=config.host,
             port=config.port,
             database=config.database,
@@ -159,11 +160,12 @@ async def list_databases():
             table_count = None
             if is_connected:
                 try:
+                    schema_name = get_adapter(config.db_type).get_schema_name(config)
                     async with db_manager.get_connection(db_id) as conn:
                         result = await conn.execute(text(
                             "SELECT COUNT(*) FROM information_schema.tables "
-                            "WHERE table_schema = 'public'"
-                        ))
+                            "WHERE table_schema = :schema_name"
+                        ), {"schema_name": schema_name})
                         table_count = result.fetchone()[0]
                 except Exception as e:
                     logger.warning("failed_to_get_table_count", database_id=db_id, error=str(e))
@@ -188,151 +190,8 @@ async def list_databases():
     return DatabaseListResponse(
         success=True,
         databases=databases,
-        default_database_id=db_manager._default_db_id
+        default_database_id=None
     )
-
-
-@router.get("/{database_id}", response_model=Dict[str, Any])
-async def get_database_info(database_id: str):
-    """
-    Get detailed information about a specific database.
-
-    Returns connection details, status, and whether it's the default database.
-    """
-    db_manager = get_db_manager()
-
-    if database_id not in db_manager.list_databases():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": f"Database '{database_id}' not found",
-                "code": "DATABASE_NOT_FOUND"
-            }
-        )
-
-    try:
-        config = db_manager.get_database_config(database_id)
-        is_connected = await db_manager.is_database_connected(database_id)
-
-        # Get table count if connected
-        table_count = None
-        if is_connected:
-            try:
-                async with db_manager.get_connection(database_id) as conn:
-                    result = await conn.execute(text(
-                        "SELECT COUNT(*) FROM information_schema.tables "
-                        "WHERE table_schema = 'public'"
-                    ))
-                    table_count = result.fetchone()[0]
-            except Exception as e:
-                logger.warning("failed_to_get_table_count", database_id=database_id, error=str(e))
-
-        database_info = DatabaseInfo(
-            database_id=database_id,
-            nickname=config.nickname,
-            db_type=config.db_type,
-            host=config.host,
-            port=config.port,
-            database=config.database,
-            username=config.username,
-            is_connected=is_connected,
-            table_count=table_count,
-            ssl_mode=config.ssl_mode
-        )
-
-        return {
-            "success": True,
-            "database": database_info,
-            "is_default": database_id == db_manager._default_db_id
-        }
-
-    except Exception as e:
-        logger.error("get_database_info_failed", database_id=database_id, error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": f"Failed to get database info: {str(e)}",
-                "code": "DATABASE_INFO_FAILED"
-            }
-        )
-
-
-@router.delete("/{database_id}")
-async def remove_database(database_id: str):
-    """
-    Remove a database connection.
-
-    Disconnects and removes the specified database from the manager.
-    """
-    db_manager = get_db_manager()
-
-    if database_id not in db_manager.list_databases():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": f"Database '{database_id}' not found",
-                "code": "DATABASE_NOT_FOUND"
-            }
-        )
-
-    try:
-        await db_manager.disconnect_database(database_id)
-
-        logger.info("database_removed", database_id=database_id)
-
-        return {
-            "success": True,
-            "message": f"Database '{database_id}' disconnected and removed"
-        }
-
-    except Exception as e:
-        logger.error("remove_database_failed", database_id=database_id, error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": f"Failed to remove database: {str(e)}",
-                "code": "DATABASE_REMOVE_FAILED"
-            }
-        )
-
-
-@router.post("/{database_id}/set-default")
-async def set_default_database(database_id: str):
-    """
-    Set the default database for queries.
-
-    The default database is used when no database_id is specified in a query.
-    """
-    db_manager = get_db_manager()
-
-    if database_id not in db_manager.list_databases():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": f"Database '{database_id}' not found",
-                "code": "DATABASE_NOT_FOUND"
-            }
-        )
-
-    try:
-        db_manager.set_default_database(database_id)
-
-        logger.info("default_database_set", database_id=database_id)
-
-        return {
-            "success": True,
-            "default_database_id": database_id
-        }
-
-    except Exception as e:
-        logger.error("set_default_database_failed", database_id=database_id, error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": f"Failed to set default database: {str(e)}",
-                "code": "SET_DEFAULT_FAILED"
-            }
-        )
 
 
 @router.get("/current", response_model=Dict[str, Any])
@@ -354,13 +213,13 @@ async def get_current_database():
         )
 
     try:
-        config = db_manager._config
+        default_id = db_manager._default_db_id
+        config = db_manager.get_database_config(default_id)
 
         # Test connection
         is_connected = False
         try:
-            async with db_manager.get_connection() as conn:
-                from sqlalchemy import text
+            async with db_manager.get_connection(default_id) as conn:
                 await conn.execute(text("SELECT 1"))
                 is_connected = True
         except Exception as e:
@@ -374,6 +233,7 @@ async def get_current_database():
                 "database": config.database,
                 "username": config.username,
                 "ssl_mode": config.ssl_mode,
+                "db_type": config.db_type,
                 "is_connected": is_connected
             }
         }
@@ -408,13 +268,14 @@ async def disconnect_database():
         )
 
     try:
-        await db_manager.close()
+        default_id = db_manager._default_db_id
+        await db_manager.disconnect_database(default_id)
 
-        logger.info("database_disconnected")
+        logger.info("database_disconnected", database_id=default_id)
 
         return {
             "success": True,
-            "message": "Database disconnected successfully"
+            "message": f"Database '{default_id}' disconnected successfully"
         }
 
     except Exception as e:
@@ -442,23 +303,25 @@ async def test_database_connection(config: DatabaseConfigRequest):
     )
 
     try:
-        # Import required modules
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-        from sqlalchemy import text
-        import asyncpg
+        from sqlalchemy.ext.asyncio import create_async_engine
 
-        # Build connection URL
-        connection_url = (
-            f"postgresql+asyncpg://{config.username}:{config.password}"
-            f"@{config.host}:{config.port}/{config.database}"
+        # Build a DatabaseConfig so the adapter can work with it.
+        # database_id is required by the model but never persisted here.
+        db_config = DatabaseConfig(
+            database_id="__test__",
+            db_type=config.db_type or "postgresql",
+            host=config.host,
+            port=config.port,
+            database=config.database,
+            username=config.username,
+            password=config.password,
+            ssl_mode=config.ssl_mode
         )
 
-        # Add SSL mode
-        if config.ssl_mode:
-            connection_url += f"?ssl={config.ssl_mode}"
+        adapter = get_adapter(db_config.db_type)
+        connection_url = adapter.build_connection_url(db_config)
 
-        # Create temporary engine
-        engine: AsyncEngine = create_async_engine(
+        engine = create_async_engine(
             connection_url,
             pool_pre_ping=True,
             pool_size=1,
@@ -466,17 +329,15 @@ async def test_database_connection(config: DatabaseConfigRequest):
         )
 
         try:
-            # Test connection
             async with engine.connect() as conn:
+                # version() is standard SQL on both PostgreSQL and MySQL
                 result = await conn.execute(text("SELECT version()"))
                 version_info = result.fetchone()
 
-                # Get database size
-                size_result = await conn.execute(
-                    text("SELECT pg_size_pretty(pg_database_size(:dbname))"),
-                    {"dbname": config.database}
-                )
-                db_size = size_result.fetchone()[0]
+                # Engine-specific size query via adapter
+                size_query, size_params = adapter.get_size_query(db_config)
+                size_result = await conn.execute(text(size_query), size_params)
+                db_size = size_result.fetchone()[0] or "0 MB"
 
             logger.info(
                 "database_connection_test_successful",
@@ -534,42 +395,44 @@ async def get_database_stats():
         )
 
     try:
-        async with db_manager.get_connection() as conn:
-            from sqlalchemy import text
+        default_id = db_manager._default_db_id
+        config = db_manager.get_database_config(default_id)
+        adapter = get_adapter(config.db_type)
+        schema_name = adapter.get_schema_name(config)
 
-            # Get table count
+        async with db_manager.get_connection() as conn:
+            # Table count — information_schema works on both engines;
+            # only the schema name differs (handled by adapter above).
             table_count_result = await conn.execute(
                 text("""
                     SELECT COUNT(*)
                     FROM information_schema.tables
-                    WHERE table_schema = 'public'
-                """)
+                    WHERE table_schema = :schema_name
+                """),
+                {"schema_name": schema_name}
             )
             table_count = table_count_result.fetchone()[0]
 
-            # Get database size
-            db_size_result = await conn.execute(
-                text("SELECT pg_size_pretty(pg_database_size(current_database()))")
-            )
-            db_size = db_size_result.fetchone()[0]
+            # Database size — engine-specific query via adapter
+            size_query, size_params = adapter.get_size_query(config)
+            db_size_result = await conn.execute(text(size_query), size_params)
+            db_size = db_size_result.fetchone()[0] or "0 MB"
 
-            # Get connection count
+            # Active connection count — engine-specific via adapter
             conn_count_result = await conn.execute(
-                text("""
-                    SELECT count(*)
-                    FROM pg_stat_activity
-                    WHERE datname = current_database()
-                """)
+                text(adapter.get_connection_count_query())
             )
             active_connections = conn_count_result.fetchone()[0]
 
-        # Get pool stats
+        # Get pool stats from the actual engine for this database
         pool_info = {}
-        if db_manager._engine:
+        engine = db_manager._engines.get(default_id)
+        if engine:
             try:
+                overflow_fn = getattr(engine.pool, 'overflow', None)
                 pool_info = {
-                    "pool_size": db_manager._engine.pool.size(),
-                    "pool_overflow": getattr(db_manager._engine.pool, 'overflow', -1),
+                    "pool_size": engine.pool.size(),
+                    "pool_overflow": overflow_fn() if callable(overflow_fn) else -1,
                 }
             except Exception as e:
                 logger.warning("failed_to_get_pool_stats", error=str(e))
@@ -592,5 +455,212 @@ async def get_database_stats():
             detail={
                 "message": f"Failed to get database stats: {str(e)}",
                 "code": "DATABASE_STATS_FAILED"
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Parameterised routes — MUST come after /current, /stats, /test so that
+# FastAPI does not swallow those literal paths as {database_id}.
+# ---------------------------------------------------------------------------
+
+@router.get("/{database_id}", response_model=Dict[str, Any])
+async def get_database_info(database_id: str):
+    """Get detailed information about a specific database."""
+    db_manager = get_db_manager()
+
+    if database_id not in db_manager.list_databases():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": f"Database '{database_id}' not found",
+                "code": "DATABASE_NOT_FOUND"
+            }
+        )
+
+    try:
+        config = db_manager.get_database_config(database_id)
+        is_connected = await db_manager.is_database_connected(database_id)
+
+        table_count = None
+        if is_connected:
+            try:
+                schema_name = get_adapter(config.db_type).get_schema_name(config)
+                async with db_manager.get_connection(database_id) as conn:
+                    result = await conn.execute(text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = :schema_name"
+                    ), {"schema_name": schema_name})
+                    table_count = result.fetchone()[0]
+            except Exception as e:
+                logger.warning("failed_to_get_table_count", database_id=database_id, error=str(e))
+
+        database_info = DatabaseInfo(
+            database_id=database_id,
+            nickname=config.nickname,
+            db_type=config.db_type,
+            host=config.host,
+            port=config.port,
+            database=config.database,
+            username=config.username,
+            is_connected=is_connected,
+            table_count=table_count,
+            ssl_mode=config.ssl_mode
+        )
+
+        return {
+            "success": True,
+            "database": database_info,
+            "is_default": database_id == db_manager._default_db_id
+        }
+
+    except Exception as e:
+        logger.error("get_database_info_failed", database_id=database_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": f"Failed to get database info: {str(e)}",
+                "code": "DATABASE_INFO_FAILED"
+            }
+        )
+
+
+@router.put("/{database_id}", response_model=Dict[str, Any])
+async def update_database(database_id: str, config: DatabaseConfigRequest):
+    """
+    Update an existing database connection.
+
+    Disconnects the current engine, re-registers with the new config,
+    and verifies the connection.  If the password field is empty the
+    existing (encrypted) password is preserved.
+    """
+    db_manager = get_db_manager()
+
+    if database_id not in db_manager.list_databases():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": f"Database '{database_id}' not found",
+                "code": "DATABASE_NOT_FOUND"
+            }
+        )
+
+    try:
+        # If password is empty, keep the existing one (it stays encrypted on disk)
+        password = config.password
+        if not password:
+            existing_config = db_manager.get_database_config(database_id)
+            password = existing_config.password
+
+        # Tear down the old engine
+        await db_manager.disconnect_database(database_id)
+
+        # Build updated config
+        db_config = DatabaseConfig(
+            database_id=database_id,
+            nickname=config.nickname,
+            db_type=config.db_type,
+            host=config.host,
+            port=config.port,
+            database=config.database,
+            username=config.username,
+            password=password,
+            ssl_mode=config.ssl_mode
+        )
+
+        # Re-register (creates engine + saves to disk)
+        db_manager.register_database(database_id, db_config)
+
+        # Verify the new connection works
+        async with db_manager.get_connection(database_id) as conn:
+            await conn.execute(text("SELECT 1"))
+
+        logger.info("database_updated", database_id=database_id)
+
+        return {
+            "success": True,
+            "message": f"Database '{database_id}' updated successfully",
+            "database_id": database_id
+        }
+
+    except Exception as e:
+        logger.error("database_update_failed", database_id=database_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": f"Failed to update database: {str(e)}",
+                "code": "DATABASE_UPDATE_FAILED"
+            }
+        )
+
+
+@router.delete("/{database_id}")
+async def remove_database(database_id: str):
+    """Remove a database connection."""
+    db_manager = get_db_manager()
+
+    if database_id not in db_manager.list_databases():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": f"Database '{database_id}' not found",
+                "code": "DATABASE_NOT_FOUND"
+            }
+        )
+
+    try:
+        await db_manager.disconnect_database(database_id)
+        logger.info("database_removed", database_id=database_id)
+
+        return {
+            "success": True,
+            "message": f"Database '{database_id}' disconnected and removed"
+        }
+
+    except Exception as e:
+        logger.error("remove_database_failed", database_id=database_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": f"Failed to remove database: {str(e)}",
+                "code": "DATABASE_REMOVE_FAILED"
+            }
+        )
+
+
+@router.post("/{database_id}/set-default")
+async def set_default_database(database_id: str):
+    """Set the default database for queries.
+
+    Deprecated: the frontend no longer uses a default database concept.
+    Kept for backwards compatibility with existing API consumers.
+    """
+    db_manager = get_db_manager()
+
+    if database_id not in db_manager.list_databases():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": f"Database '{database_id}' not found",
+                "code": "DATABASE_NOT_FOUND"
+            }
+        )
+
+    try:
+        db_manager.set_default_database(database_id)
+        logger.info("default_database_set", database_id=database_id)
+
+        return {
+            "success": True,
+            "default_database_id": database_id
+        }
+
+    except Exception as e:
+        logger.error("set_default_database_failed", database_id=database_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": f"Failed to set default database: {str(e)}",
+                "code": "SET_DEFAULT_FAILED"
             }
         )

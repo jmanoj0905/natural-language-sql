@@ -52,7 +52,7 @@ class OllamaClient:
             AIAPIError: If API call fails
         """
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/generate",
                     json={
@@ -61,6 +61,7 @@ class OllamaClient:
                         "stream": False,
                         "options": {
                             "temperature": self.settings.OLLAMA_TEMPERATURE,
+                            "stop": ["```"],
                         }
                     }
                 )
@@ -89,13 +90,20 @@ class OllamaClient:
             raise AIAPIError(
                 "Cannot connect to Ollama. Make sure Ollama is running: 'ollama serve'"
             )
+        except httpx.ReadTimeout:
+            logger.error("ollama_timeout", timeout=300)
+            raise AIAPIError(
+                "Ollama took too long to respond (>300s). The model may be overloaded or the prompt too large."
+            )
         except Exception as e:
+            error_msg = str(e) or type(e).__name__
             logger.error(
                 "ollama_content_generation_failed",
-                error=str(e),
+                error=error_msg,
+                error_type=type(e).__name__,
                 prompt=prompt[:200]
             )
-            raise AIAPIError(f"Failed to generate content: {str(e)}")
+            raise AIAPIError(f"Failed to generate content: {error_msg}")
 
 
 # Global client instance

@@ -44,14 +44,6 @@ class Settings(BaseSettings):
     # Caching Configuration
     ENABLE_SCHEMA_CACHE: bool = True
     SCHEMA_CACHE_TTL_SECONDS: int = 3600  # 1 hour
-    ENABLE_QUERY_CACHE: bool = True
-    QUERY_CACHE_TTL_SECONDS: int = 300    # 5 minutes
-
-    # Redis Configuration (Optional)
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 0
-    REDIS_PASSWORD: str = ""
 
     # Logging Configuration
     LOG_LEVEL: str = "INFO"

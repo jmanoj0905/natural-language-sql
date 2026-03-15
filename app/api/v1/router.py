@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health, query, schema, database
+from app.api.v1.endpoints import health, query, query_stream, schema, database
 
 # Create API v1 router
 api_router = APIRouter()
@@ -10,5 +10,6 @@ api_router = APIRouter()
 # Include all endpoint routers
 api_router.include_router(health.router)
 api_router.include_router(query.router)
+api_router.include_router(query_stream.router)
 api_router.include_router(schema.router)
 api_router.include_router(database.router)

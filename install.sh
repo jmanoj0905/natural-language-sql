@@ -356,7 +356,7 @@ setup_docker_services() {
     # Check if docker-compose.yml exists
     if [ ! -f "docker-compose.yml" ]; then
         print_warning "docker-compose.yml not found"
-        print_info "You'll need to manually set up Ollama and databases"
+        print_info "You'll need to manually set up Ollama"
         return
     fi
 

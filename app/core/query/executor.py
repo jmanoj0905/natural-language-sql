@@ -126,20 +126,14 @@ class QueryExecutor:
                 "message": f"Successfully affected {affected_rows} row(s)"
             }]
 
-        # For SELECT queries, fetch all rows
-        rows = result.fetchall()
+        # For SELECT queries, fetch all rows as dicts via mappings()
+        rows = result.mappings().all()
 
-        # Get column names
-        columns = result.keys()
-
-        # Convert rows to dictionaries with serializable values
-        results = []
-        for row in rows:
-            row_dict = {}
-            for col_name, value in zip(columns, row):
-                # Convert non-JSON-serializable types
-                row_dict[col_name] = self._serialize_value(value)
-            results.append(row_dict)
+        # Convert non-JSON-serializable values (Decimal, datetime, bytes)
+        results = [
+            {col: self._serialize_value(val) for col, val in row.items()}
+            for row in rows
+        ]
 
         return results
 

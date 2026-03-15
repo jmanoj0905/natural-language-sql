@@ -31,22 +31,21 @@ ${YELLOW}Usage:${NC}
   ./run.sh ${GREEN}COMMAND${NC} [OPTIONS]
 
 ${YELLOW}Commands:${NC}
-  ${GREEN}dev${NC}              Start development environment (frontend + backend + DB)
+  ${GREEN}dev${NC}              Start development environment (frontend + backend + Ollama)
   ${GREEN}prod${NC}             Start production mode (backend only)
-  ${GREEN}setup-ollama${NC}     Setup Docker Ollama with llama3.2
+  ${GREEN}setup-ollama${NC}     Install Ollama and pull the SQL model
   ${GREEN}stop${NC}             Stop all running services
-  ${GREEN}clean${NC}            Clean up containers, logs, and temp files
+  ${GREEN}clean${NC}            Clean up logs and temp files
   ${GREEN}logs${NC}             Show application logs
   ${GREEN}help${NC}             Show this help message
 
 ${YELLOW}Development Options:${NC}
   ${GREEN}--verbose, -v${NC}    Show detailed logs in real-time
-  ${GREEN}--skip-ollama${NC}    Skip Ollama setup
 
 ${YELLOW}Examples:${NC}
   ./run.sh dev              # Start development environment
   ./run.sh dev --verbose    # Start with live logs
-  ./run.sh setup-ollama     # Setup Docker Ollama
+  ./run.sh setup-ollama     # Install Ollama + pull model
   ./run.sh stop             # Stop all services
   ./run.sh clean            # Clean up everything
 
@@ -60,7 +59,6 @@ EOF
 
 # Parse global options
 VERBOSE=false
-SKIP_OLLAMA=false
 
 # Cleanup function
 cleanup() {
@@ -93,40 +91,83 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 #=============================================================================
-# COMMAND: setup-ollama
+# COMMAND: setup-ollama (native install via Homebrew)
 #=============================================================================
 cmd_setup_ollama() {
-    print_header "Docker Ollama Setup"
+    print_header "Ollama Setup (Native)"
 
-    if ! docker info > /dev/null 2>&1; then
-        print_error "Docker is not running. Please start Docker first."
+    # Install Ollama if not present
+    if ! command -v ollama &> /dev/null; then
+        if command -v brew &> /dev/null; then
+            print_info "Installing Ollama via Homebrew..."
+            brew install ollama
+        else
+            print_error "Homebrew not found. Install Ollama manually: https://ollama.com/download"
+            exit 1
+        fi
+    else
+        print_success "Ollama already installed ($(ollama --version 2>/dev/null || echo 'unknown version'))"
+    fi
+
+    # Start Ollama service
+    if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        print_info "Starting Ollama service..."
+        brew services start ollama 2>/dev/null || ollama serve &
+        sleep 3
+    fi
+
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        print_success "Ollama is running"
+    else
+        print_error "Failed to start Ollama"
         exit 1
     fi
 
-    print_success "Docker is running"
-    print_info "Starting Ollama container..."
-    docker compose up -d ollama
+    # Pull SQL model
+    OLLAMA_MODEL=$(grep '^OLLAMA_MODEL=' .env 2>/dev/null | cut -d= -f2 || echo "sqlcoder:7b")
+    print_info "Pulling model: ${OLLAMA_MODEL}..."
+    ollama pull "$OLLAMA_MODEL"
 
-    print_info "Waiting for Ollama to be ready..."
-    sleep 5
-
-    if ! docker ps | grep -q nlsql-ollama; then
-        print_error "Failed to start Ollama container"
-        exit 1
-    fi
-
-    print_success "Ollama container is running"
-    print_info "Pulling llama3.2 model (this may take a few minutes)..."
-    docker exec -it nlsql-ollama ollama pull llama3.2
-
-    print_success "llama3.2 model downloaded successfully"
+    print_success "Model downloaded successfully"
     echo ""
-    docker exec nlsql-ollama ollama list
+    ollama list
 
     print_header "Setup Complete!"
-    print_info "Ollama is now running at: http://localhost:11434"
-    print_info "Model: llama3.2"
+    print_info "Ollama is running at: http://localhost:11434"
+    print_info "Model: ${OLLAMA_MODEL}"
     echo ""
+}
+
+#=============================================================================
+# Ensure Ollama is running (used by dev/prod)
+#=============================================================================
+ensure_ollama() {
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        print_success "Ollama is running"
+        return
+    fi
+
+    print_info "Starting Ollama..."
+    if command -v brew &> /dev/null && brew services list 2>/dev/null | grep -q ollama; then
+        brew services start ollama 2>/dev/null
+    elif command -v ollama &> /dev/null; then
+        ollama serve > /dev/null 2>&1 &
+    else
+        print_error "Ollama not installed. Run: ./run.sh setup-ollama"
+        exit 1
+    fi
+
+    # Wait up to 10s for Ollama to be ready
+    for i in $(seq 1 10); do
+        if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+            print_success "Ollama started"
+            return
+        fi
+        sleep 1
+    done
+
+    print_error "Ollama failed to start"
+    exit 1
 }
 
 #=============================================================================
@@ -155,31 +196,12 @@ cmd_dev() {
 
     command -v node &> /dev/null || { print_error "Node.js not installed"; exit 1; }
     command -v npm &> /dev/null || { print_error "npm not installed"; exit 1; }
-    command -v docker &> /dev/null || { print_error "Docker not installed"; exit 1; }
 
     print_success "All prerequisites met"
 
-    # Start Docker Ollama
-    print_header "Starting Docker Ollama"
-    if docker ps | grep -q nlsql-ollama; then
-        print_success "Ollama container already running"
-    else
-        print_info "Starting Ollama container..."
-        docker compose up -d ollama
-        sleep 3
-        print_success "Ollama container started"
-    fi
-
-    # Start PostgreSQL
-    print_header "Starting PostgreSQL Database"
-    if docker ps | grep -q "nlsql-postgres"; then
-        print_success "PostgreSQL already running"
-    else
-        print_info "Starting PostgreSQL..."
-        docker compose up -d postgres
-        sleep 5
-        print_success "PostgreSQL started"
-    fi
+    # Start Ollama
+    print_header "Starting Ollama"
+    ensure_ollama
 
     # Start Backend
     print_header "Starting Backend (FastAPI)"
@@ -246,6 +268,9 @@ cmd_dev() {
     fi
     cd ..
 
+    # Read model name from .env
+    OLLAMA_MODEL=$(grep '^OLLAMA_MODEL=' .env 2>/dev/null | cut -d= -f2 || echo "unknown")
+
     # Summary
     print_header "All Services Running!"
     echo -e "${GREEN}================================================${NC}"
@@ -255,8 +280,7 @@ cmd_dev() {
     echo -e "${BLUE}Frontend:${NC}      http://localhost:3000"
     echo -e "${BLUE}Backend API:${NC}   http://localhost:8000"
     echo -e "${BLUE}API Docs:${NC}      http://localhost:8000/docs"
-    echo -e "${BLUE}Database:${NC}      PostgreSQL on localhost:5432"
-    echo -e "${BLUE}AI Model:${NC}      Docker Ollama llama3.2"
+    echo -e "${BLUE}AI Model:${NC}      Ollama ${OLLAMA_MODEL}"
     echo ""
     echo -e "${RED}To stop:${NC} Press ${YELLOW}Ctrl+C${NC}"
     echo ""
@@ -283,6 +307,8 @@ cmd_prod() {
 
     [ ! -f ".env" ] && { print_error ".env file not found"; exit 1; }
 
+    ensure_ollama
+
     export $(cat .env | grep -v '^#' | xargs)
 
     if [ -d ".venv" ]; then
@@ -302,9 +328,6 @@ cmd_stop() {
     lsof -ti:3000 | xargs kill -9 2>/dev/null || true
     lsof -ti:8000 | xargs kill -9 2>/dev/null || true
 
-    print_info "Stopping Docker containers..."
-    docker compose stop 2>/dev/null || true
-
     print_success "All services stopped"
 }
 
@@ -314,7 +337,7 @@ cmd_stop() {
 cmd_clean() {
     print_header "Cleaning Up"
 
-    read -p "This will remove containers, logs, and cache. Continue? (y/N) " -n 1 -r
+    read -p "This will remove logs and cache. Continue? (y/N) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         print_info "Cancelled"
@@ -323,9 +346,6 @@ cmd_clean() {
 
     print_info "Stopping services..."
     cmd_stop
-
-    print_info "Removing Docker containers..."
-    docker compose down 2>/dev/null || true
 
     print_info "Cleaning logs..."
     rm -rf logs/*.log logs/*.log.* 2>/dev/null || true
@@ -374,18 +394,8 @@ shift 2>/dev/null || true
 for arg in "$@"; do
     case $arg in
         --verbose|-v) VERBOSE=true ;;
-        --skip-ollama) SKIP_OLLAMA=true ;;
     esac
 done
-
-# Auto-setup Ollama if not running and command is dev
-if [ "$COMMAND" = "dev" ]; then
-    if ! docker ps | grep -q nlsql-ollama 2>/dev/null; then
-        print_info "Ollama not running. Setting up Docker Ollama..."
-        cmd_setup_ollama
-        echo ""
-    fi
-fi
 
 case $COMMAND in
     dev)           cmd_dev ;;

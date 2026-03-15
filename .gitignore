@@ -38,6 +38,7 @@ venv.bak/
 *~
 .DS_Store
 .claude/
+CLAUDE.md
 
 # Environment Variables
 .env
