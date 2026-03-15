@@ -65,20 +65,26 @@ cleanup() {
     echo ""
     print_header "Shutting Down Services"
 
-    [ ! -z "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
+    [ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
 
-    if [ ! -z "$FRONTEND_PID" ]; then
+    if [ -n "$FRONTEND_PID" ]; then
         print_info "Stopping frontend..."
         kill -TERM -$FRONTEND_PID 2>/dev/null || kill $FRONTEND_PID 2>/dev/null || true
         sleep 1
         kill -9 -$FRONTEND_PID 2>/dev/null || kill -9 $FRONTEND_PID 2>/dev/null || true
     fi
 
-    if [ ! -z "$BACKEND_PID" ]; then
+    if [ -n "$BACKEND_PID" ]; then
         print_info "Stopping backend..."
         kill -TERM -$BACKEND_PID 2>/dev/null || kill $BACKEND_PID 2>/dev/null || true
         sleep 1
         kill -9 -$BACKEND_PID 2>/dev/null || kill -9 $BACKEND_PID 2>/dev/null || true
+    fi
+
+    # Only stop Ollama if we started it ourselves (leave managed services alone)
+    if [ -n "$OLLAMA_SERVE_PID" ]; then
+        print_info "Stopping ollama serve..."
+        kill $OLLAMA_SERVE_PID 2>/dev/null || true
     fi
 
     lsof -ti:8000 | xargs kill -9 2>/dev/null || true
@@ -90,84 +96,141 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# PID of a background `ollama serve` we may have started ourselves
+OLLAMA_SERVE_PID=""
+
 #=============================================================================
-# COMMAND: setup-ollama (native install via Homebrew)
+# COMMAND: setup-ollama
 #=============================================================================
 cmd_setup_ollama() {
-    print_header "Ollama Setup (Native)"
+    print_header "Ollama Setup"
 
-    # Install Ollama if not present
+    # Install if missing
     if ! command -v ollama &> /dev/null; then
         if command -v brew &> /dev/null; then
             print_info "Installing Ollama via Homebrew..."
             brew install ollama
         else
-            print_error "Homebrew not found. Install Ollama manually: https://ollama.com/download"
+            print_error "Homebrew not found. Install Ollama manually from https://ollama.com/download"
             exit 1
         fi
     else
         print_success "Ollama already installed ($(ollama --version 2>/dev/null || echo 'unknown version'))"
     fi
 
-    # Start Ollama service
-    if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-        print_info "Starting Ollama service..."
-        brew services start ollama 2>/dev/null || ollama serve &
-        sleep 3
-    fi
-
-    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-        print_success "Ollama is running"
-    else
-        print_error "Failed to start Ollama"
-        exit 1
-    fi
-
-    # Pull SQL model
-    OLLAMA_MODEL=$(grep '^OLLAMA_MODEL=' .env 2>/dev/null | cut -d= -f2 || echo "sqlcoder:7b")
-    print_info "Pulling model: ${OLLAMA_MODEL}..."
-    ollama pull "$OLLAMA_MODEL"
-
-    print_success "Model downloaded successfully"
-    echo ""
-    ollama list
+    # Bring the service up (reuses ensure_ollama logic)
+    ensure_ollama
 
     print_header "Setup Complete!"
     print_info "Ollama is running at: http://localhost:11434"
-    print_info "Model: ${OLLAMA_MODEL}"
+    print_info "Model: ${OLLAMA_MODEL_NAME}"
     echo ""
+    ollama list
 }
 
 #=============================================================================
-# Ensure Ollama is running (used by dev/prod)
+# ollama_start_service — attempt to start the Ollama daemon
+#   Returns 0 if we believe we issued a start command, 1 if nothing to try.
+#   Does NOT wait for readiness — caller does that.
 #=============================================================================
-ensure_ollama() {
-    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-        print_success "Ollama is running"
-        return
-    fi
-
-    print_info "Starting Ollama..."
-    if command -v brew &> /dev/null && brew services list 2>/dev/null | grep -q ollama; then
-        brew services start ollama 2>/dev/null
-    elif command -v ollama &> /dev/null; then
-        ollama serve > /dev/null 2>&1 &
-    else
+ollama_start_service() {
+    if ! command -v ollama &> /dev/null; then
         print_error "Ollama not installed. Run: ./run.sh setup-ollama"
         exit 1
     fi
 
-    # Wait up to 10s for Ollama to be ready
-    for i in $(seq 1 10); do
-        if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-            print_success "Ollama started"
-            return
-        fi
-        sleep 1
-    done
+    # macOS: prefer launchctl (works for both brew formula and .app installs)
+    local launchctl_label=""
+    if launchctl list 2>/dev/null | grep -q "homebrew.mxcl.ollama"; then
+        launchctl_label="homebrew.mxcl.ollama"
+    elif launchctl list 2>/dev/null | grep -q "com.ollama.ollama"; then
+        launchctl_label="com.ollama.ollama"
+    fi
 
-    print_error "Ollama failed to start"
-    exit 1
+    if [ -n "$launchctl_label" ]; then
+        print_info "Starting Ollama via launchctl ($launchctl_label)..."
+        launchctl kickstart -k "gui/$(id -u)/$launchctl_label" 2>/dev/null || \
+            launchctl start "$launchctl_label" 2>/dev/null || true
+        return 0
+    fi
+
+    # Fallback: brew services (Linux or non-launchctl macOS)
+    if command -v brew &> /dev/null && brew services list 2>/dev/null | grep -q "^ollama"; then
+        print_info "Starting Ollama via brew services..."
+        brew services start ollama 2>/dev/null || true
+        return 0
+    fi
+
+    # Last resort: spawn directly
+    print_info "Spawning ollama serve in background..."
+    ollama serve > /tmp/ollama-serve.log 2>&1 &
+    OLLAMA_SERVE_PID=$!
+    return 0
+}
+
+#=============================================================================
+# ensure_ollama — make sure Ollama is up and the model is available
+#=============================================================================
+ensure_ollama() {
+    # ── 1. Read the model name from .env ──────────────────────────────────
+    OLLAMA_MODEL_NAME=$(grep '^OLLAMA_MODEL=' .env 2>/dev/null \
+        | cut -d= -f2 | tr -d '"' | tr -d "'" | tr -d '[:space:]')
+    OLLAMA_MODEL_NAME="${OLLAMA_MODEL_NAME:-mannix/defog-llama3-sqlcoder-8b}"
+
+    # ── 2. Check if API is already up ─────────────────────────────────────
+    if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
+        print_success "Ollama is running"
+    else
+        print_info "Ollama is not running — attempting to start..."
+        ollama_start_service
+
+        # Wait up to 20 s for the API to become available
+        local ready=false
+        for i in $(seq 1 20); do
+            if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
+                ready=true
+                break
+            fi
+            sleep 1
+        done
+
+        if [ "$ready" = false ]; then
+            print_error "Ollama did not respond after 20 s. Check logs or run: ollama serve"
+            [ -n "$OLLAMA_SERVE_PID" ] && cat /tmp/ollama-serve.log 2>/dev/null || true
+            exit 1
+        fi
+        print_success "Ollama is running"
+    fi
+
+    # ── 3. Check the model is available; pull if not ──────────────────────
+    print_info "Checking model: ${OLLAMA_MODEL_NAME}..."
+
+    local model_base="${OLLAMA_MODEL_NAME%%:*}"
+    if ollama list 2>/dev/null | grep -qi "^${model_base}"; then
+        print_success "Model '${OLLAMA_MODEL_NAME}' is installed"
+    else
+        print_warning "Model '${OLLAMA_MODEL_NAME}' not found locally — pulling now (may take a few minutes)..."
+        ollama pull "$OLLAMA_MODEL_NAME" || {
+            print_error "Failed to pull '${OLLAMA_MODEL_NAME}'. Check your internet connection."
+            exit 1
+        }
+        print_success "Model '${OLLAMA_MODEL_NAME}' pulled"
+    fi
+
+    # ── 4. Warm up — load the model into memory now so the first query is instant
+    print_info "Loading model into memory (this takes ~20s for first load)..."
+    local warm_response
+    warm_response=$(curl -sf --max-time 60 \
+        -X POST http://localhost:11434/api/generate \
+        -H 'Content-Type: application/json' \
+        -d "{\"model\": \"${OLLAMA_MODEL_NAME}\", \"prompt\": \"SELECT\", \"stream\": false}" \
+        2>/dev/null)
+
+    if [ $? -eq 0 ]; then
+        print_success "Model '${OLLAMA_MODEL_NAME}' is loaded and ready"
+    else
+        print_warning "Warm-up timed out — model will load on first query (may be slow)"
+    fi
 }
 
 #=============================================================================
@@ -268,9 +331,6 @@ cmd_dev() {
     fi
     cd ..
 
-    # Read model name from .env
-    OLLAMA_MODEL=$(grep '^OLLAMA_MODEL=' .env 2>/dev/null | cut -d= -f2 || echo "unknown")
-
     # Summary
     print_header "All Services Running!"
     echo -e "${GREEN}================================================${NC}"
@@ -280,7 +340,7 @@ cmd_dev() {
     echo -e "${BLUE}Frontend:${NC}      http://localhost:3000"
     echo -e "${BLUE}Backend API:${NC}   http://localhost:8000"
     echo -e "${BLUE}API Docs:${NC}      http://localhost:8000/docs"
-    echo -e "${BLUE}AI Model:${NC}      Ollama ${OLLAMA_MODEL}"
+    echo -e "${BLUE}AI Model:${NC}      Ollama ${OLLAMA_MODEL_NAME}"
     echo ""
     echo -e "${RED}To stop:${NC} Press ${YELLOW}Ctrl+C${NC}"
     echo ""

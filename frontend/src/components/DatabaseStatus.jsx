@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 
 export default function DatabaseStatus({ health, databases = [], onRefresh }) {
   const [refreshing, setRefreshing] = useState(false)
@@ -9,47 +11,44 @@ export default function DatabaseStatus({ health, databases = [], onRefresh }) {
     setTimeout(() => setRefreshing(false), 500)
   }
 
-  // Multi-database status
   const connectedCount = databases.filter(db => db.is_connected).length
   const totalCount = databases.length
 
-  // Fallback to single database health check for backwards compatibility
   const isHealthy = totalCount > 0
     ? connectedCount > 0
     : health?.database_configured && health?.database_connected
 
   const getStatusColor = () => {
-    if (totalCount === 0) return 'bg-gray-400'
-    if (connectedCount === totalCount) return 'bg-green-500'
-    if (connectedCount > 0) return 'bg-yellow-500'
-    return 'bg-red-500'
+    if (totalCount === 0) return 'bg-danger'
+    if (connectedCount === totalCount) return 'bg-success'
+    if (connectedCount > 0) return 'bg-warning'
+    return 'bg-danger'
   }
 
   const getStatusText = () => {
-    if (totalCount === 0) return 'No databases configured'
-    if (connectedCount === totalCount) return `${totalCount} database${totalCount > 1 ? 's' : ''} connected`
-    if (connectedCount > 0) return `${connectedCount}/${totalCount} databases connected`
-    return `${totalCount} database${totalCount > 1 ? 's' : ''} disconnected`
+    if (totalCount === 0) return 'No databases'
+    if (connectedCount === totalCount) return `${totalCount} DB${totalCount > 1 ? 's' : ''} connected`
+    if (connectedCount > 0) return `${connectedCount}/${totalCount} DBs connected`
+    return `${totalCount} DB${totalCount > 1 ? 's' : ''} disconnected`
   }
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center gap-2">
-        <div className={`h-3 w-3 rounded-full ${getStatusColor()} ${isHealthy ? 'animate-pulse' : ''}`} />
-        <span className="text-sm font-medium text-gray-700">
-          {getStatusText()}
-        </span>
-      </div>
-      <button
+    <div className="flex items-center gap-2">
+      <Badge variant="neutral" className="gap-2">
+        <div className={`h-2.5 w-2.5 rounded-full ${getStatusColor()} ${isHealthy ? 'animate-pulse' : ''}`} />
+        <span className="uppercase text-xs">{getStatusText()}</span>
+      </Badge>
+      <Button
+        variant="neutral"
+        size="icon"
         onClick={handleRefresh}
         disabled={refreshing}
-        className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-        title="Refresh status"
+        className="h-8 w-8"
       >
-        <svg className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
-      </button>
+      </Button>
     </div>
   )
 }

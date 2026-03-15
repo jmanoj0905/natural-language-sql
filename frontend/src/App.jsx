@@ -6,6 +6,8 @@ import ResultsDisplay from './components/ResultsDisplay'
 import QueryHistory from './components/QueryHistory'
 import DatabaseStatus from './components/DatabaseStatus'
 import { useToast } from './hooks/useToast.jsx'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 
 const API_BASE = '/api/v1'
 
@@ -71,7 +73,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Sidebar */}
       <AppSidebar
         databases={databases}
@@ -85,34 +87,41 @@ function App() {
       {/* Main area */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
+        <header className="bg-main border-b-2 border-border px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-gray-900">Natural Language SQL</h1>
+            <h1
+              className="text-2xl uppercase tracking-tight text-secondary-background"
+              style={{
+                fontFamily: '"Archivo Black", system-ui, sans-serif',
+                textShadow: '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000',
+              }}
+            >
+              NLSQL
+            </h1>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <Button
+              variant="neutral"
+              size="sm"
               onClick={() => setShowHistory(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                showHistory ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-              title="Query history"
+              className={showHistory ? 'bg-info/30' : ''}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               History
-            </button>
+            </Button>
 
-            <button
+            <Button
+              variant="neutral"
+              size="sm"
               onClick={() => setHowToUseOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="How to use"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Help
-            </button>
+            </Button>
 
             <DatabaseStatus
               health={dbHealth}
@@ -137,12 +146,12 @@ function App() {
 
           {/* History panel */}
           {showHistory && (
-            <div className="w-80 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto p-4">
+            <div className="w-80 shrink-0 border-l-2 border-border bg-background overflow-y-auto p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Query History</h2>
+                <h2 className="text-sm uppercase tracking-wide">Query History</h2>
                 <button
                   onClick={() => setShowHistory(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-foreground hover:text-danger"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -156,50 +165,35 @@ function App() {
       </div>
 
       {/* How to Use Modal */}
-      {howToUseOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-          onClick={() => setHowToUseOpen(false)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">How to Use</h2>
-              <button onClick={() => setHowToUseOpen(false)} className="text-gray-400 hover:text-gray-600">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-5">
-              {[
-                { n: 1, title: 'Add a Database', text: 'Click "+ Add Connection" in the sidebar and enter your PostgreSQL or MySQL credentials.' },
-                { n: 2, title: 'Select a Database', text: 'Click a database in the sidebar to select it for querying. The selected one highlights in blue.' },
-                { n: 3, title: 'Ask in Plain English', text: 'Type your question naturally — e.g. "Show me all users who signed up in the last 7 days".' },
-                { n: 4, title: 'Review & Execute', text: 'The AI generates SQL and executes it automatically. Toggle Write Mode to run INSERT/UPDATE/DELETE.' },
-              ].map(({ n, title, text }) => (
-                <div key={n} className="flex gap-4">
-                  <div className="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm">{n}</div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-0.5">{title}</h3>
-                    <p className="text-sm text-gray-600">{text}</p>
-                  </div>
+      <Dialog open={howToUseOpen} onOpenChange={setHowToUseOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">HOW TO USE</DialogTitle>
+            <DialogDescription>Get started in 4 simple steps</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            {[
+              { n: 1, title: 'Add a Database', text: 'Click "+ Add Connection" in the sidebar and enter your PostgreSQL or MySQL credentials.' },
+              { n: 2, title: 'Select a Database', text: 'Click a database in the sidebar to select it for querying. The selected one highlights in yellow.' },
+              { n: 3, title: 'Ask in Plain English', text: 'Type your question naturally — e.g. "Show me all users who signed up in the last 7 days".' },
+              { n: 4, title: 'Review & Execute', text: 'The AI generates SQL and executes it automatically. Toggle Write Mode to run INSERT/UPDATE/DELETE.' },
+            ].map(({ n, title, text }) => (
+              <div key={n} className="flex gap-4">
+                <div className="shrink-0 w-8 h-8 bg-sidebar border-2 border-border flex items-center justify-center font-heading text-sm text-foreground">{n}</div>
+                <div>
+                  <h3 className="font-heading mb-0.5">{title}</h3>
+                  <p className="text-sm font-base">{text}</p>
                 </div>
-              ))}
-            </div>
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setHowToUseOpen(false)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                Got it!
-              </button>
-            </div>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button onClick={() => setHowToUseOpen(false)}>
+              GOT IT!
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

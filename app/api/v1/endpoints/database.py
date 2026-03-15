@@ -214,6 +214,14 @@ async def get_current_database():
 
     try:
         default_id = db_manager._default_db_id
+        if not default_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "No default database is set",
+                    "code": "DATABASE_NOT_CONFIGURED"
+                }
+            )
         config = db_manager.get_database_config(default_id)
 
         # Test connection
@@ -238,6 +246,8 @@ async def get_current_database():
             }
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("get_current_database_failed", error=str(e))
         raise HTTPException(
@@ -269,6 +279,14 @@ async def disconnect_database():
 
     try:
         default_id = db_manager._default_db_id
+        if not default_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "No default database is set",
+                    "code": "DATABASE_NOT_CONFIGURED"
+                }
+            )
         await db_manager.disconnect_database(default_id)
 
         logger.info("database_disconnected", database_id=default_id)
@@ -278,6 +296,8 @@ async def disconnect_database():
             "message": f"Database '{default_id}' disconnected successfully"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("database_disconnect_failed", error=str(e))
         raise HTTPException(
@@ -287,6 +307,35 @@ async def disconnect_database():
                 "code": "DATABASE_DISCONNECT_FAILED"
             }
         )
+
+
+def _humanize_connection_error(error: Exception, host: str, port: int, database: str, username: str) -> str:
+    """Translate raw driver exceptions into plain-English messages."""
+    err = str(error).lower()
+
+    if "connection refused" in err or "connect call failed" in err:
+        return f"Can't reach the server. Is the database running on {host}:{port}?"
+    if "could not translate host" in err or "name or service not known" in err or "nodename nor servname" in err or "getaddrinfo failed" in err:
+        return f"Hostname '{host}' not found. Double-check the host address."
+    if "timeout" in err or "timed out" in err:
+        return f"Connection timed out. The server at {host}:{port} is not responding."
+    if "password authentication failed" in err:
+        return f"Wrong password for user '{username}'."
+    if "access denied" in err:
+        return f"Access denied — wrong username or password for '{username}'."
+    if "role" in err and "does not exist" in err:
+        return f"User '{username}' does not exist on this server."
+    if "database" in err and "does not exist" in err:
+        return f"Database '{database}' does not exist on this server."
+    if "unknown database" in err:
+        return f"Database '{database}' does not exist on this server."
+    if "ssl" in err:
+        return "SSL connection error. Try setting SSL Mode to 'Disable' for a local server."
+    if "too many connections" in err:
+        return "The server has too many open connections. Try again shortly."
+    # Fallback — still clean up noise
+    first_line = str(error).split('\n')[0].strip()
+    return f"Connection failed: {first_line}"
 
 
 @router.post("/test", response_model=Dict[str, Any])
@@ -361,6 +410,7 @@ async def test_database_connection(config: DatabaseConfigRequest):
             await engine.dispose()
 
     except Exception as e:
+        human_msg = _humanize_connection_error(e, config.host, config.port, config.database, config.username)
         logger.error(
             "database_connection_test_failed",
             host=config.host,
@@ -370,7 +420,7 @@ async def test_database_connection(config: DatabaseConfigRequest):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": f"Connection test failed: {str(e)}",
+                "message": human_msg,
                 "code": "CONNECTION_TEST_FAILED"
             }
         )
@@ -396,11 +446,19 @@ async def get_database_stats():
 
     try:
         default_id = db_manager._default_db_id
+        if not default_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "No default database is set",
+                    "code": "DATABASE_NOT_CONFIGURED"
+                }
+            )
         config = db_manager.get_database_config(default_id)
         adapter = get_adapter(config.db_type)
         schema_name = adapter.get_schema_name(config)
 
-        async with db_manager.get_connection() as conn:
+        async with db_manager.get_connection(default_id) as conn:
             # Table count — information_schema works on both engines;
             # only the schema name differs (handled by adapter above).
             table_count_result = await conn.execute(
@@ -448,6 +506,8 @@ async def get_database_stats():
             }
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("get_database_stats_failed", error=str(e))
         raise HTTPException(

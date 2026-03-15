@@ -19,6 +19,7 @@ from app.core.ai.prompts import (
     build_sql_generation_prompt,
     extract_sql_from_response,
     extract_explanation_from_response,
+    build_explanation,
 )
 from app.core.database.schema_inspector import SchemaInspector
 from app.core.query.validator import QueryValidator
@@ -135,21 +136,31 @@ async def natural_language_query_stream(
                 })
                 t0 = time.perf_counter()
 
+                raw_db_type = (db_config.db_type or "postgresql").lower()
+                database_type = "MySQL" if raw_db_type == "mysql" else "PostgreSQL"
                 prompt = build_sql_generation_prompt(
                     question=request.question,
                     schema_context=schema_context,
-                    database_type=db_config.db_type or "PostgreSQL",
+                    database_type=database_type,
                     max_limit=settings.MAX_QUERY_RESULTS,
                     read_only=request.options.read_only,
                 )
                 response_text = await ai_client.generate_content(prompt)
+                logger.debug("ollama_raw_response", response=response_text)
                 sql = extract_sql_from_response(response_text)
                 explanation = extract_explanation_from_response(response_text)
+                if not explanation and sql:
+                    explanation = build_explanation(request.question, sql)
 
                 if not sql:
+                    logger.error(
+                        "sql_extraction_failed",
+                        response=response_text,
+                    )
                     yield sse_event("error", {
                         "stage": "ai",
                         "error": "Failed to extract SQL from AI response",
+                        "raw_response": response_text[:500],
                         "code": "AI_PARSE_ERROR",
                     })
                     return

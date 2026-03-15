@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 const STAGE_CONFIG = [
   { id: 'connect', label: 'Connecting' },
@@ -11,26 +12,26 @@ const STAGE_CONFIG = [
 function StageIcon({ status, index }) {
   if (status === 'completed') {
     return (
-      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-4 h-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
       </svg>
     )
   }
   if (status === 'error') {
     return (
-      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-4 h-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
       </svg>
     )
   }
   if (status === 'skipped') {
     return (
-      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-3.5 h-3.5 text-foreground/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M20 12H4" />
       </svg>
     )
   }
-  return <span className="text-xs font-bold">{index + 1}</span>
+  return <span className="text-xs font-heading">{index + 1}</span>
 }
 
 function formatDuration(ms) {
@@ -46,14 +47,12 @@ export default function QueryProgress({ stages, error }) {
     s => s.status === 'completed' || s.status === 'skipped'
   )
 
-  // Auto-hide after success
   useEffect(() => {
     if (!allDone || error) return
     const timer = setTimeout(() => setVisible(false), 5000)
     return () => clearTimeout(timer)
   }, [allDone, error])
 
-  // Reset visibility when stages change to non-complete
   useEffect(() => {
     if (!allDone) setVisible(true)
   }, [allDone])
@@ -62,48 +61,46 @@ export default function QueryProgress({ stages, error }) {
 
   return (
     <div className={`transition-opacity duration-500 ${allDone && !error ? 'opacity-70' : 'opacity-100'}`}>
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
+      <div className="bg-secondary-background border-2 border-border rounded-base shadow-shadow p-4">
         <div className="flex items-center justify-between">
           {stages.map((stage, i) => (
             <div key={stage.id} className="flex items-center flex-1">
               {/* Step circle + label */}
               <div className="flex flex-col items-center min-w-0">
                 <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 ${
+                  className={`w-7 h-7 flex items-center justify-center transition-all duration-300 border-2 border-border rounded-base ${
                     stage.status === 'completed'
-                      ? 'bg-green-500 text-white'
+                      ? 'bg-success'
                       : stage.status === 'in_progress'
-                        ? 'bg-blue-500 text-white animate-pulse'
+                        ? 'bg-main animate-pulse'
                         : stage.status === 'error'
-                          ? 'bg-red-500 text-white'
+                          ? 'bg-danger'
                           : stage.status === 'skipped'
-                            ? 'bg-gray-200 text-gray-400'
-                            : 'bg-gray-200 text-gray-500'
+                            ? 'bg-foreground/10'
+                            : 'bg-secondary-background'
                   }`}
                 >
                   <StageIcon status={stage.status} index={i} />
                 </div>
-                <span className={`text-xs mt-1 font-medium truncate max-w-[80px] text-center ${
-                  stage.status === 'completed'
-                    ? 'text-green-700'
-                    : stage.status === 'in_progress'
-                      ? 'text-blue-700'
-                      : stage.status === 'error'
-                        ? 'text-red-700'
-                        : 'text-gray-400'
+                <span className={`text-xs mt-1 font-heading truncate max-w-[80px] text-center ${
+                  stage.status === 'completed' || stage.status === 'in_progress'
+                    ? 'text-foreground'
+                    : stage.status === 'error'
+                      ? 'text-danger'
+                      : 'text-foreground/50'
                 }`}>
                   {STAGE_CONFIG[i].label}
                 </span>
                 {stage.status === 'completed' && stage.duration_ms != null && (
-                  <span className="text-[10px] text-gray-400 font-mono">
+                  <span className="text-[10px] text-foreground/40 font-mono">
                     {formatDuration(stage.duration_ms)}
                   </span>
                 )}
                 {stage.status === 'skipped' && (
-                  <span className="text-[10px] text-gray-400">skipped</span>
+                  <span className="text-[10px] text-foreground/40 font-heading">skipped</span>
                 )}
                 {stage.status === 'in_progress' && stage.message && (
-                  <span className="text-[10px] text-blue-500 truncate max-w-[100px]">
+                  <span className="text-[10px] text-foreground/60 truncate max-w-[100px] font-heading">
                     {stage.message}
                   </span>
                 )}
@@ -111,10 +108,10 @@ export default function QueryProgress({ stages, error }) {
 
               {/* Connector line */}
               {i < stages.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-2 transition-colors duration-300 ${
+                <div className={`flex-1 h-[3px] mx-2 transition-colors duration-300 ${
                   stage.status === 'completed'
-                    ? 'bg-green-300'
-                    : 'bg-gray-200'
+                    ? 'bg-success'
+                    : 'bg-foreground/20'
                 }`} />
               )}
             </div>
@@ -123,9 +120,12 @@ export default function QueryProgress({ stages, error }) {
 
         {/* Error message */}
         {error && (
-          <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-            {error}
-          </div>
+          <Alert className="bg-danger/20 mt-3 shadow-none">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
     </div>

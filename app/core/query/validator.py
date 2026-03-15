@@ -8,7 +8,6 @@ from sqlparse.tokens import Keyword
 from app.config import get_settings
 from app.exceptions import (
     QueryValidationError,
-    ReadOnlyViolation,
     QuerySyntaxError,
 )
 from app.utils.logger import get_logger
@@ -20,24 +19,23 @@ class QueryValidator:
     """
     Validates SQL queries.
 
-    Only enforces two things:
-    1. In read-only mode: block non-SELECT queries
-    2. In read-only mode: enforce LIMIT clause
+    Enforces:
+    1. Non-empty SQL
+    2. Single statement only
+    3. LIMIT on SELECT queries
     """
 
     def __init__(self):
         self.settings = get_settings()
 
-    def validate(self, sql: str, read_only: bool = True, original_question: str = None) -> str:
+    def validate(self, sql: str, read_only: bool = False, original_question: str = None) -> str:
         """
-        Validate SQL query.
-
-        In read-only mode: only SELECT allowed, LIMIT enforced.
-        In write mode: any valid SQL passes through.
+        Validate SQL query. All operation types (SELECT, INSERT, UPDATE, DELETE, etc.) are allowed.
+        SELECT queries get a LIMIT enforced if not already present.
 
         Args:
             sql: SQL query to validate
-            read_only: If True, only allow SELECT queries
+            read_only: Ignored — kept for API compatibility
             original_question: Unused, kept for API compat
 
         Returns:
@@ -48,7 +46,6 @@ class QueryValidator:
 
         sql = sql.strip()
 
-        # Parse SQL
         try:
             parsed = sqlparse.parse(sql)
         except Exception as e:
@@ -59,26 +56,18 @@ class QueryValidator:
 
         statement = parsed[0]
 
-        # Read-only mode: block non-SELECT
-        if read_only and not self._is_select_statement(statement):
-            detected_op = self._get_statement_type(statement)
-            raise ReadOnlyViolation(
-                f"Only SELECT queries are allowed in read-only mode. Detected: {detected_op}",
-                details={"detected_operation": detected_op}
-            )
-
-        # Block multiple statements (basic safety)
+        # Block multiple statements
         if len(parsed) > 1:
             raise QueryValidationError(
                 "Multiple SQL statements are not allowed.",
                 details={"statement_count": len(parsed)}
             )
 
-        # Enforce LIMIT only for SELECT in read-only mode
-        if read_only and self._is_select_statement(statement):
+        # Enforce LIMIT on SELECT queries
+        if self._is_select_statement(statement):
             sql = self._enforce_limit(sql)
 
-        logger.info("query_validated", sql=sql[:200], read_only=read_only)
+        logger.info("query_validated", sql=sql[:200])
         return sql
 
     def _is_select_statement(self, statement: Statement) -> bool:

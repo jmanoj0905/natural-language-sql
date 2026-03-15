@@ -7,7 +7,8 @@ from app.core.ai.ollama_client import get_ollama_client
 from app.core.ai.prompts import (
     build_sql_generation_prompt,
     extract_sql_from_response,
-    extract_explanation_from_response
+    extract_explanation_from_response,
+    build_explanation,
 )
 from app.core.database.schema_inspector import SchemaInspector
 from app.core.database.connection_manager import get_db_manager
@@ -70,6 +71,9 @@ class SQLGenerator:
                 read_only=read_only
             )
 
+            if self.settings.LOG_LEVEL.upper() == "DEBUG":
+                logger.debug("ollama_prompt_sent", prompt=prompt)
+
             response = await self.ai_client.generate_content(prompt)
 
             log_ai_request(
@@ -89,6 +93,8 @@ class SQLGenerator:
                 )
 
             explanation = extract_explanation_from_response(response)
+            if not explanation:
+                explanation = build_explanation(question, sql)
 
             logger.info(
                 "sql_generated",

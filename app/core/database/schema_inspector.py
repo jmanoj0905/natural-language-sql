@@ -99,6 +99,12 @@ class SchemaInspector:
 
             lines = []
 
+            # Quick-reference table list at the very top
+            table_names = [t["name"] for t in tables_info]
+            lines.append("-- AVAILABLE TABLES (use only these exact names, do not guess):")
+            lines.append("--   " + ", ".join(table_names))
+            lines.append("")
+
             for table in tables_info:
                 table_name = table["name"]
                 columns = table["columns"]
@@ -135,12 +141,12 @@ class SchemaInspector:
 
                 lines.append("")  # blank line between tables
 
-            # Relationship summary at the end
+            # Plain-English relationship summary at the end
             if foreign_keys:
-                lines.append("-- Relationships:")
+                lines.append("-- RELATIONSHIPS (use these for JOINs):")
                 for fk in foreign_keys:
                     lines.append(
-                        f"-- {fk['table']}.{fk['column']} -> {fk['ref_table']}.{fk['ref_column']}"
+                        f"--   {fk['table']}.{fk['column']} → {fk['ref_table']}.{fk['ref_column']}"
                     )
 
             summary = "\n".join(lines)

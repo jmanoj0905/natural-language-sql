@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "neobrutalism-components-skill": {
+      "source": "ChindanaiNaKub/neobrutalism-components-skill",
+      "sourceType": "github",
+      "computedHash": "9571a9f1193dee94dce8499dde783345845ffb2b89144604c38be123717bec29"
+    }
+  }
+}
