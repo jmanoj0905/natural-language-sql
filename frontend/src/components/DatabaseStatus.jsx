@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 
 export default function DatabaseStatus({ health, databases = [], onRefresh }) {
   const [refreshing, setRefreshing] = useState(false)
@@ -34,16 +33,16 @@ export default function DatabaseStatus({ health, databases = [], onRefresh }) {
 
   return (
     <div className="flex items-center gap-2">
-      <Badge variant="neutral" className="gap-2">
+      <div className="inline-flex items-center gap-2 h-9 px-3 rounded-base border-2 border-border bg-secondary-background text-foreground shadow-shadow font-base text-xs whitespace-nowrap">
         <div className={`h-2.5 w-2.5 rounded-full ${getStatusColor()} ${isHealthy ? 'animate-pulse' : ''}`} />
-        <span className="uppercase text-xs">{getStatusText()}</span>
-      </Badge>
+        <span className="uppercase">{getStatusText()}</span>
+      </div>
       <Button
         variant="neutral"
         size="icon"
         onClick={handleRefresh}
         disabled={refreshing}
-        className="h-8 w-8"
+        className="h-9 w-9"
       >
         <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

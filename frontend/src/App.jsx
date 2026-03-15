@@ -89,15 +89,7 @@ function App() {
         {/* Header */}
         <header className="bg-main border-b-2 border-border px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <h1
-              className="text-2xl uppercase tracking-tight text-secondary-background"
-              style={{
-                fontFamily: '"Archivo Black", system-ui, sans-serif',
-                textShadow: '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000',
-              }}
-            >
-              NLSQL
-            </h1>
+            <h1 className="text-2xl font-heading uppercase tracking-tight">NLSQL</h1>
           </div>
           <div className="flex items-center gap-3">
             <Button

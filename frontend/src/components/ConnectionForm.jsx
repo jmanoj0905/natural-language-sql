@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { getDefaults, DB_TYPE_LIST, getLabel } from '../data/providers'
+import DbIcon from './DbIcon'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -108,14 +109,32 @@ export default function ConnectionForm({
 
         <Field label="Database Type" required>
           {isNew ? (
-            <select name="db_type" value={formData.db_type} onChange={handleChange}
-              className="flex h-10 w-full rounded-base border-2 border-border bg-secondary-background px-3 py-2 text-sm font-base text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2">
+            <div className="space-y-2">
               {DB_TYPE_LIST.map(t => (
-                <option key={t.id} value={t.id}>{t.emoji}  {t.label}</option>
+                <label
+                  key={t.id}
+                  className={`flex items-center gap-3 px-3 py-2.5 border-2 border-border rounded-base cursor-pointer transition-all duration-150 ${
+                    formData.db_type === t.id
+                      ? 'bg-main shadow-shadow'
+                      : 'bg-secondary-background hover:translate-x-boxShadowX hover:translate-y-boxShadowY hover:shadow-none shadow-shadow'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="db_type"
+                    value={t.id}
+                    checked={formData.db_type === t.id}
+                    onChange={handleChange}
+                    className="sr-only"
+                  />
+                  <DbIcon dbType={t.id} className="w-5 h-5" />
+                  <span className="text-sm font-heading">{t.label}</span>
+                </label>
               ))}
-            </select>
+            </div>
           ) : (
-            <div className="px-3 py-2 bg-main/20 border-2 border-border rounded-base text-sm font-heading">
+            <div className="flex items-center gap-2 px-3 py-2 bg-main/20 border-2 border-border rounded-base text-sm font-heading">
+              <DbIcon dbType={formData.db_type} className="w-4 h-4" />
               {getLabel(formData.db_type)}
             </div>
           )}

@@ -5,7 +5,6 @@ export const DB_TYPES = {
   postgresql: {
     id: 'postgresql',
     label: 'PostgreSQL',
-    emoji: '\uD83D\uDC18',
     defaultPort: 5432,
     defaultUsername: 'postgres',
     defaultSslMode: 'disable',
@@ -14,7 +13,6 @@ export const DB_TYPES = {
   mysql: {
     id: 'mysql',
     label: 'MySQL',
-    emoji: '\uD83D\uDC2C',
     defaultPort: 3306,
     defaultUsername: 'root',
     defaultSslMode: 'disable',
@@ -37,9 +35,6 @@ export const getDefaults = (dbType) => {
     ssl_mode: t.defaultSslMode,
   }
 }
-
-// Helper: get emoji for a db_type
-export const getEmoji = (dbType) => DB_TYPES[dbType]?.emoji || '\uD83D\uDDC4\uFE0F'
 
 // Helper: get label for a db_type
 export const getLabel = (dbType) => DB_TYPES[dbType]?.label || dbType

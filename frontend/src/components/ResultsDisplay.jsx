@@ -171,18 +171,18 @@ export default function ResultsDisplay({ result }) {
             </div>
           )}
 
+          {/* Explanation */}
+          {sql_explanation && (
+            <p className="px-5 py-4 text-sm text-foreground leading-relaxed border-t-2 border-border bg-secondary-background font-base">
+              {sql_explanation}
+            </p>
+          )}
+
           {/* Footer */}
           <div className="flex items-center gap-4 px-5 py-2 bg-main/10 border-t-2 border-border text-xs text-foreground/50 font-mono">
             <span>{metadata?.ai_model}</span>
             <span className="ml-auto">{metadata?.timestamp ? new Date(metadata.timestamp).toLocaleTimeString() : ''}</span>
           </div>
-
-          {/* Explanation */}
-          {sql_explanation && (
-            <p className="px-5 py-3 text-xs text-foreground/60 leading-relaxed border-t-2 border-border bg-secondary-background font-base">
-              {sql_explanation}
-            </p>
-          )}
         </Card>
       )}
     </div>

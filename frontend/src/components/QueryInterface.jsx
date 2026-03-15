@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useToast } from '../hooks/useToast.jsx'
-import { getEmoji } from '../data/providers'
+import DbIcon from './DbIcon'
 import QueryProgress from './QueryProgress'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -176,7 +176,7 @@ export default function QueryInterface({
           <div className="flex flex-wrap gap-2">
             {selectedDbs.map(db => (
               <Badge key={db.database_id} variant="neutral" className="gap-1.5 pr-1.5">
-                <span>{getEmoji(db.db_type)}</span>
+                <DbIcon dbType={db.db_type} className="w-3.5 h-3.5" />
                 <span>{db.nickname || db.database_id}</span>
                 {!db.is_connected && <span className="text-danger ml-0.5">(offline)</span>}
                 <button

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import { getEmoji, getLabel } from '../data/providers'
+import { getLabel } from '../data/providers'
+import DbIcon from './DbIcon'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -53,7 +54,7 @@ export default function SchemaModal({ database, onClose }) {
         {/* Header */}
         <DialogHeader className="px-6 pt-6 pb-4 border-b-2 border-border">
           <DialogTitle className="flex items-center gap-2">
-            <span className="text-xl">{getEmoji(database.db_type)}</span>
+            <DbIcon dbType={database.db_type} className="w-5 h-5" />
             {database.nickname || database.database_id}
           </DialogTitle>
           <DialogDescription>
