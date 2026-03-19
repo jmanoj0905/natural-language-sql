@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     RELOAD: bool = False
 
     # AI Configuration - Ollama (Local, FREE, No API key needed!)
-    OLLAMA_MODEL: str = "llama3.2"  # or codellama, mistral, llama3.1, etc.
+    OLLAMA_MODEL: str = "mannix/defog-llama3-sqlcoder-8b"  # SQL-specialized model
     OLLAMA_TEMPERATURE: float = 0.1
     OLLAMA_BASE_URL: str = "http://localhost:11434"  # Ollama API endpoint
 

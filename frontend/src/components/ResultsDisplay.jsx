@@ -123,8 +123,11 @@ export default function ResultsDisplay({ result }) {
               <TableHeader>
                 <TableRow className="bg-main/20">
                   {execution_result.columns.map((col, i) => (
-                    <TableHead key={i} className="text-xs uppercase tracking-wider">
-                      {col}
+                    <TableHead
+                      key={i}
+                      className={`text-xs uppercase tracking-wider ${col === '__source_db__' ? 'bg-info/15 text-info' : ''}`}
+                    >
+                      {col === '__source_db__' ? 'SOURCE' : col}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -137,11 +140,12 @@ export default function ResultsDisplay({ result }) {
                   >
                     {execution_result.columns.map((col, ci) => {
                       const val = row[col]
-                      const isNum = val !== null && !isNaN(Number(val)) && typeof val !== 'boolean'
+                      const isSource = col === '__source_db__'
+                      const isNum = !isSource && val !== null && !isNaN(Number(val)) && typeof val !== 'boolean'
                       return (
                         <TableCell
                           key={ci}
-                          className={`text-sm max-w-xs truncate ${isNum ? 'text-right font-mono tabular-nums' : ''}`}
+                          className={`text-sm max-w-xs truncate ${isSource ? 'bg-info/5 font-heading text-info text-xs' : ''} ${isNum ? 'text-right font-mono tabular-nums' : ''}`}
                         >
                           {val === null ? (
                             <span className="text-foreground/30 italic text-xs">null</span>
@@ -171,6 +175,16 @@ export default function ResultsDisplay({ result }) {
             </div>
           )}
 
+          {/* Multi-DB warnings */}
+          {result.warnings?.length > 0 && (
+            <div className="px-5 py-3 border-t-2 border-border bg-warning/10 space-y-1">
+              <span className="text-xs font-heading text-warning uppercase">Partial results — some databases failed:</span>
+              {result.warnings.map((w, i) => (
+                <p key={i} className="text-xs text-foreground/70 font-mono">{w}</p>
+              ))}
+            </div>
+          )}
+
           {/* Explanation */}
           {sql_explanation && (
             <p className="px-5 py-4 text-sm text-foreground leading-relaxed border-t-2 border-border bg-secondary-background font-base">
@@ -181,6 +195,11 @@ export default function ResultsDisplay({ result }) {
           {/* Footer */}
           <div className="flex items-center gap-4 px-5 py-2 bg-main/10 border-t-2 border-border text-xs text-foreground/50 font-mono">
             <span>{metadata?.ai_model}</span>
+            {metadata?.multi_db && (
+              <span className="text-info">
+                {metadata.database_nicknames?.length} databases
+              </span>
+            )}
             <span className="ml-auto">{metadata?.timestamp ? new Date(metadata.timestamp).toLocaleTimeString() : ''}</span>
           </div>
         </Card>

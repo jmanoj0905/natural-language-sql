@@ -213,7 +213,7 @@ export default function AppSidebar({
     <div className="flex flex-col bg-sidebar text-foreground w-64 shrink-0 overflow-hidden border-r-2 border-border">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b-2 border-border">
-        <span className="text-base font-heading uppercase tracking-wide text-white">Databases</span>
+        <span className="text-base font-heading uppercase tracking-wide text-black">Databases</span>
         <Button variant="neutral" size="icon" onClick={onToggleCollapse} className="h-7 w-7" title="Collapse sidebar">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />

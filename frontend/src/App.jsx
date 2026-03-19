@@ -68,7 +68,9 @@ function App() {
       rowCount: result.execution_result?.row_count || 0,
       executionTime: result.execution_result?.execution_time_ms || 0,
       timestamp: new Date().toLocaleString(),
-      databaseId: result.metadata?.database_id,
+      databaseId: result.metadata?.multi_db
+        ? result.metadata.database_ids
+        : result.metadata?.database_id,
     }, ...prev].slice(0, 20))
   }
 
