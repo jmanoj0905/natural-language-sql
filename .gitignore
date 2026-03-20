@@ -36,9 +36,6 @@ venv.bak/
 *.swp
 *.swo
 *~
-.DS_Store
-.claude/
-CLAUDE.md
 
 # Environment Variables
 .env
@@ -110,3 +107,17 @@ docker-compose.override.yml
 
 # Project specific
 .cache/
+
+# AI tool directories (agent skills, IDE integrations)
+.agents/
+.claude/
+.crush/
+.goose/
+.openhands/
+.vibe/
+skills-lock.json
+CLAUDE.md
+
+# Generated docs / scratch files
+OPTIMIZATIONS_*.md
+Architecture.jpg

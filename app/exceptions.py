@@ -67,14 +67,6 @@ class SQLInjectionAttempt(QueryValidationError):
 class ReadOnlyViolation(QueryValidationError):
     """Raised when non-SELECT query is attempted in read-only mode."""
 
-    def __init__(self, detected_operation: str):
-        super().__init__(
-            f"Only SELECT queries are allowed. Detected: {detected_operation}",
-            details={"detected_operation": detected_operation}
-        )
-        self.code = "READ_ONLY_VIOLATION"
-
-
 class QuerySyntaxError(QueryValidationError):
     """Raised when SQL syntax is invalid."""
 
@@ -103,35 +95,12 @@ class QueryTimeoutError(QueryExecutionError):
         self.code = "QUERY_TIMEOUT"
 
 
-class ResultLimitExceededError(QueryExecutionError):
-    """Raised when query results exceed maximum limit."""
-
-    def __init__(self, row_count: int, max_limit: int):
-        super().__init__(
-            f"Query returned {row_count} rows, exceeding maximum limit of {max_limit}",
-            details={"row_count": row_count, "max_limit": max_limit}
-        )
-        self.code = "RESULT_LIMIT_EXCEEDED"
-
-
 # AI API Exceptions (Ollama)
 class AIAPIError(NLSQLException):
     """Base exception for AI API errors."""
 
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(message, code="AI_API_ERROR", details=details)
-
-
-class AIAPIRateLimitError(AIAPIError):
-    """Raised when AI API rate limit is exceeded."""
-
-    def __init__(self, retry_after: Optional[int] = None):
-        details = {"retry_after_seconds": retry_after} if retry_after else {}
-        super().__init__(
-            "AI API rate limit exceeded",
-            details=details
-        )
-        self.code = "AI_RATE_LIMIT"
 
 
 class AIParseError(AIAPIError):
@@ -162,29 +131,3 @@ class TableNotFoundError(SchemaIntrospectionError):
         self.code = "TABLE_NOT_FOUND"
 
 
-# Optimization Exceptions
-class QueryOptimizationError(NLSQLException):
-    """Raised when query optimization fails."""
-
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, code="QUERY_OPTIMIZATION_ERROR", details=details)
-
-
-# Cache Exceptions
-class CacheError(NLSQLException):
-    """Raised when cache operations fail."""
-
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, code="CACHE_ERROR", details=details)
-
-
-# Rate Limiting Exceptions
-class RateLimitExceeded(NLSQLException):
-    """Raised when API rate limit is exceeded."""
-
-    def __init__(self, limit: int, window: str = "minute"):
-        super().__init__(
-            f"Rate limit of {limit} requests per {window} exceeded",
-            details={"limit": limit, "window": window}
-        )
-        self.code = "RATE_LIMIT_EXCEEDED"

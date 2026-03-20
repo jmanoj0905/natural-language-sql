@@ -3,37 +3,33 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --border-radius: 5px;
+  --border-radius: 16px;
   --box-shadow-x: 4px;
   --box-shadow-y: 4px;
   --reverse-box-shadow-x: -4px;
   --reverse-box-shadow-y: -4px;
 
   --heading-font-weight: 900;
-  --base-font-weight: 500;
+  --base-font-weight: 400;
 
-  /* Base Colors */
-  --background: #F8F0FB;
-  --secondary-background: #FFFFFF;
-  --foreground: #2D2B3D;
-  --main-foreground: #2D2B3D;
+  /* Colors — M3-inspired pastel palette */
+  --background: #f8fafc;
+  --secondary-background: #ffffff;
+  --foreground: #1a1c1d;
+  --main-foreground: #1a1c1d;
 
-  /* Primary Brand Color */
-  --main: #C4B5FD;
+  --main: #E9D5FF;
 
-  /* Borders and Overlays */
-  --border: #2D2B3D;
-  --ring: #2D2B3D;
-  --overlay: rgba(45, 43, 61, 0.75);
+  --border: #1a1c1d;
+  --ring: #1a1c1d;
+  --overlay: rgba(26, 28, 29, 0.75);
 
-  /* Neobrutalism Shadow */
   --shadow: var(--box-shadow-x) var(--box-shadow-y) 0px 0px var(--border);
 
-  /* App-specific colors */
-  --sidebar: #DDD6FE;
-  --danger: #FCA5A5;
-  --success: #86EFAC;
-  --info: #93C5FD;
+  --sidebar: #ffffff;
+  --danger: #FEE2E2;
+  --success: #D1FAE5;
+  --info: #c2cbff;
   --warning: #FDE68A;
 }
 
@@ -65,18 +61,20 @@
   --font-weight-heading: var(--heading-font-weight);
   --font-weight-base: var(--base-font-weight);
 
-  --font-sans: "Inter", system-ui, sans-serif;
-  --font-mono: "Space Mono", ui-monospace, monospace;
-  --font-title: "Archivo Black", system-ui, sans-serif;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
+  --font-sans: "Work Sans", system-ui, sans-serif;
+  --font-base: "Work Sans", system-ui, sans-serif;
+  --font-label: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 @layer base {
   * {
-    border-color: var(--color-border, #000);
+    border-color: var(--color-border, #1a1c1d);
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter", system-ui, sans-serif;
+    font-family: "Work Sans", system-ui, sans-serif;
     font-weight: var(--base-font-weight);
     font-feature-settings: "rlig" 1, "calt" 1;
   }
@@ -84,6 +82,24 @@
     font-family: "Space Grotesk", system-ui, sans-serif;
     font-weight: var(--heading-font-weight);
   }
+}
+
+/* Material Symbols */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Neobrutalist utilities */
+.soft-shadow { box-shadow: 4px 4px 0px 0px #1a1c1d; }
+.soft-shadow-lg { box-shadow: 6px 6px 0px 0px #1a1c1d; }
+.active-press:active { transform: translate(1px, 1px); box-shadow: none; }
+.brutalist-border { border: 2px solid #1a1c1d; }
+
+.hatch-pattern {
+  background-color: #f8fafc;
+  background-image: radial-gradient(#cbd5e1 0.5px, transparent 0.5px);
+  background-size: 16px 16px;
 }
 
 @keyframes slide-in-right {

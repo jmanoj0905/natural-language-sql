@@ -94,11 +94,7 @@ async def natural_language_query(
             )
 
             # 2. Validate SQL
-            validated_sql = validator.validate(
-                sql,
-                read_only=request.options.read_only,
-                original_question=request.question
-            )
+            validated_sql = validator.validate(sql)
 
             # 3. Execute if requested
             execution_result = None

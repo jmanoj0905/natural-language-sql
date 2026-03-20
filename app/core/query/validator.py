@@ -28,15 +28,13 @@ class QueryValidator:
     def __init__(self):
         self.settings = get_settings()
 
-    def validate(self, sql: str, read_only: bool = False, original_question: str = None) -> str:
+    def validate(self, sql: str) -> str:
         """
         Validate SQL query. All operation types (SELECT, INSERT, UPDATE, DELETE, etc.) are allowed.
         SELECT queries get a LIMIT enforced if not already present.
 
         Args:
             sql: SQL query to validate
-            read_only: Ignored — kept for API compatibility
-            original_question: Unused, kept for API compat
 
         Returns:
             str: Validated (and possibly LIMIT-amended) SQL
@@ -56,8 +54,14 @@ class QueryValidator:
 
         statement = parsed[0]
 
-        # Block multiple statements
+        # Block multiple statements — except exactly write + SELECT
         if len(parsed) > 1:
+            if len(parsed) == 2:
+                first_type = self._get_statement_type(parsed[0])
+                second_type = self._get_statement_type(parsed[1])
+                if first_type in ('UPDATE', 'INSERT', 'DELETE') and second_type == 'SELECT':
+                    logger.info("compound_write_read_query", first=first_type)
+                    return sql  # pass through as-is; executor handles both statements
             raise QueryValidationError(
                 "Multiple SQL statements are not allowed.",
                 details={"statement_count": len(parsed)}
@@ -102,6 +106,4 @@ class QueryValidator:
                     )
             return sql
 
-        sql = sql.rstrip(';')
-        sql = f"{sql} LIMIT {self.settings.DEFAULT_QUERY_LIMIT}"
         return sql

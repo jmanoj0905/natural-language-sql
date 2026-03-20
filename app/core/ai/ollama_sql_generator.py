@@ -67,7 +67,6 @@ class SQLGenerator:
                 question=question,
                 schema_context=schema_context,
                 database_type=database_type,
-                max_limit=self.settings.MAX_QUERY_RESULTS,
                 read_only=read_only
             )
 

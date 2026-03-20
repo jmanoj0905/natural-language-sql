@@ -9,7 +9,6 @@ def build_sql_generation_prompt(
     question: str,
     schema_context: str,
     database_type: str = "PostgreSQL",
-    max_limit: int = 100,
     read_only: bool = False
 ) -> str:
     """
@@ -24,11 +23,14 @@ def build_sql_generation_prompt(
     if read_only:
         constraint = (
             f"Use {database_type} syntax. Only generate SELECT queries. "
-            f"Add LIMIT {max_limit} if none specified. {enforcement}"
+            f"{enforcement}"
         )
     else:
         constraint = (
             f"Use {database_type} syntax. Generate exactly the SQL the user is asking for. "
+            f"If the question asks to both modify data AND view results, output the write "
+            f"statement (UPDATE/INSERT/DELETE) followed by a SELECT statement, separated by a "
+            f"semicolon on a new line. "
             f"{enforcement}"
         )
 

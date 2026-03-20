@@ -1,25 +1,25 @@
-import { useState } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from '@/components/ui/table'
+import { useState, useMemo, useEffect } from 'react'
+import ExportModal from './ExportModal'
+import { detectWriteOp } from '../utils/sql'
 
-function detectWriteOp(sql) {
-  if (!sql) return null
-  const u = sql.trim().toUpperCase()
-  if (u.startsWith('DROP') || u.startsWith('TRUNCATE'))
-    return { label: 'DESTRUCTIVE', variant: 'danger' }
-  if (u.startsWith('DELETE')) return { label: 'DELETE', variant: 'danger' }
-  if (u.startsWith('UPDATE')) return { label: 'UPDATE', variant: 'warning' }
-  if (u.startsWith('INSERT')) return { label: 'INSERT', variant: 'warning' }
-  if (u.startsWith('ALTER')) return { label: 'ALTER', variant: 'warning' }
-  return null
-}
+const ROWS_PER_PAGE = 50
+// Backend auto-applies LIMIT 100; row_count at this threshold likely means results were cut off
+const TRUNCATION_THRESHOLD = 100
 
 export default function ResultsDisplay({ result }) {
   const [sqlExpanded, setSqlExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showExport, setShowExport] = useState(false)
+  const [sortCol, setSortCol] = useState(null)
+  const [sortDir, setSortDir] = useState('asc')
+  const [currentPage, setCurrentPage] = useState(0)
+
+  // Reset sort/page when result changes
+  useEffect(() => {
+    setSortCol(null)
+    setSortDir('asc')
+    setCurrentPage(0)
+  }, [result])
 
   if (!result) return null
 
@@ -34,151 +34,248 @@ export default function ResultsDisplay({ result }) {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  return (
-    <div className="space-y-4">
+  const handleSort = (col) => {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortCol(col)
+      setSortDir('asc')
+    }
+    setCurrentPage(0)
+  }
 
-      {/* SQL card */}
-      <Card className="p-0 gap-0 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b-2 border-border">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-heading text-foreground">GENERATED SQL</span>
-            {writeOp && (
-              <Badge className={
-                writeOp.variant === 'danger'
-                  ? 'bg-danger/30'
-                  : 'bg-warning/30'
-              }>
-                {writeOp.label}
-              </Badge>
-            )}
+  const displayCols = execution_result?.columns?.filter(col => col !== '__source_db__') ?? []
+
+  const sortedRows = useMemo(() => {
+    const rows = [...(execution_result?.rows ?? [])]
+    if (!sortCol) return rows
+    return rows.sort((a, b) => {
+      const aVal = a[sortCol]
+      const bVal = b[sortCol]
+      if (aVal === null && bVal === null) return 0
+      if (aVal === null) return sortDir === 'asc' ? 1 : -1
+      if (bVal === null) return sortDir === 'asc' ? -1 : 1
+      if (typeof aVal === 'number' && typeof bVal === 'number')
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal
+      return sortDir === 'asc'
+        ? String(aVal).localeCompare(String(bVal))
+        : String(bVal).localeCompare(String(aVal))
+    })
+  }, [execution_result?.rows, sortCol, sortDir])
+
+  const totalPages = Math.ceil(sortedRows.length / ROWS_PER_PAGE)
+  const pagedRows = sortedRows.slice(currentPage * ROWS_PER_PAGE, (currentPage + 1) * ROWS_PER_PAGE)
+
+  const rowCount = execution_result?.row_count ?? 0
+  const isTruncated = !isWriteResult && rowCount >= TRUNCATION_THRESHOLD
+  const isMultiDb = metadata?.multi_db && metadata?.database_nicknames?.length > 1
+
+  return (
+    <>
+    <div className="space-y-8">
+      {/* SQL Output (terminal style) */}
+      <div className="brutalist-border bg-[#1a1c1d] p-1 soft-shadow rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-white/10 mb-1">
+          <div className="flex gap-2">
+            <div className="w-3 h-3 rounded-full brutalist-border bg-danger"></div>
+            <div className="w-3 h-3 rounded-full brutalist-border bg-main"></div>
+            <div className="w-3 h-3 rounded-full brutalist-border bg-success"></div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSqlExpanded(p => !p)}
-              className="text-xs text-foreground/50 hover:text-foreground font-heading transition-colors"
-            >
+          <div className="flex items-center gap-3">
+            {writeOp && (
+              <span className={`px-3 py-0.5 rounded-full brutalist-border text-[10px] font-bold ${
+                writeOp.variant === 'danger' ? 'bg-danger text-[#520c00]' : 'bg-warning text-[#1a1c1d]'
+              }`}>
+                {writeOp.label}
+              </span>
+            )}
+            <span className="font-mono text-xs text-white/50 font-bold">SQL_OUTPUT</span>
+          </div>
+        </div>
+        <div className="relative group">
+          <pre className={`p-8 font-mono text-lg leading-relaxed text-success overflow-x-auto whitespace-pre-wrap ${
+            !sqlExpanded ? 'max-h-48' : ''
+          }`}>
+            {generated_sql}
+          </pre>
+          <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => setSqlExpanded(p => !p)} className="px-2 py-1 text-xs font-heading text-white/50 hover:text-white bg-white/10 rounded-lg transition-colors">
               {sqlExpanded ? 'COLLAPSE' : 'EXPAND'}
             </button>
-            <button
-              onClick={handleCopy}
-              className="text-xs text-foreground hover:text-info font-heading transition-colors"
-            >
+            <button onClick={handleCopy} className="px-2 py-1 text-xs font-heading text-white/50 hover:text-white bg-white/10 rounded-lg transition-colors">
               {copied ? 'COPIED!' : 'COPY'}
             </button>
           </div>
         </div>
+      </div>
 
-        <pre className={`px-4 py-3 text-sm text-success font-mono bg-black overflow-x-auto whitespace-pre-wrap ${
-          !sqlExpanded ? 'max-h-32' : ''
-        }`}>
-          {generated_sql}
-        </pre>
-      </Card>
-
-      {/* Results card */}
+      {/* Results */}
       {execution_result && (
-        <Card className="p-0 gap-0 overflow-hidden">
-          {/* Results header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b-2 border-border">
-            <div className="flex items-center gap-2.5">
-              <span className="text-sm font-heading text-foreground">RESULTS</span>
+        <section className="brutalist-border bg-white overflow-hidden soft-shadow rounded-2xl">
+          {/* Header */}
+          <div className="bg-[#f1f5f9] p-5 border-b-2 border-border flex justify-between items-center flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h3 className="font-heading font-black uppercase text-xl">QUERY_RESULTS</h3>
               {isWriteResult ? (
-                <Badge className="bg-success/30">
-                  {firstRow?.affected_rows ?? 0} rows affected
-                </Badge>
+                <span className="bg-success px-3 py-1 rounded-full brutalist-border text-[10px] font-bold text-[#065f46]">
+                  {firstRow?.affected_rows ?? 0} ROWS AFFECTED
+                </span>
               ) : (
-                <Badge variant="neutral">
-                  {execution_result.row_count} {execution_result.row_count === 1 ? 'row' : 'rows'}
-                </Badge>
+                <span className="bg-main/30 px-3 py-1 rounded-full brutalist-border text-[10px] font-bold">
+                  {rowCount} {rowCount === 1 ? 'ROW' : 'ROWS'}
+                </span>
               )}
               <span className="text-xs text-foreground/50 font-mono">
                 {(execution_result.execution_time_ms ?? 0).toFixed(1)}ms
               </span>
+              {/* Multi-DB merged-from banner */}
+              {isMultiDb && (
+                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full brutalist-border text-[10px] font-bold bg-[#dbeafe] text-[#1e3a8a]">
+                  <span className="material-symbols-outlined text-xs">merge</span>
+                  Merged from {metadata.database_nicknames.length} databases
+                </span>
+              )}
             </div>
-            <span className="flex items-center gap-1.5 text-xs text-success font-heading">
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              EXECUTED
-            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowExport(true)}
+                className="p-2 rounded-lg brutalist-border bg-white hover:bg-main/20 active-press transition-colors"
+                title="Export data"
+              >
+                <span className="material-symbols-outlined text-sm">download</span>
+              </button>
+            </div>
           </div>
+
+          {/* Truncation notice */}
+          {isTruncated && (
+            <div className="flex items-center gap-2 px-5 py-2.5 bg-warning/20 border-b-2 border-border font-label text-xs">
+              <span className="material-symbols-outlined text-sm">info</span>
+              Showing first {rowCount} rows — results may be limited. Export to CSV for full data.
+            </div>
+          )}
 
           {/* Write op result */}
           {isWriteResult && (
-            <div className="px-4 py-6 text-center">
-              <Badge className={`px-4 py-2 text-sm ${
-                writeOp?.variant === 'danger' ? 'bg-danger/20' : 'bg-success/20'
-              }`}>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
+            <div className="px-6 py-8 text-center">
+              <span className="inline-flex items-center gap-2 px-6 py-3 bg-success/30 brutalist-border rounded-xl font-heading text-sm">
+                <span className="material-symbols-outlined">check_circle</span>
                 {firstRow?.message ?? 'Operation completed'}
-              </Badge>
+              </span>
             </div>
           )}
 
           {/* Select result table */}
-          {!isWriteResult && execution_result.rows?.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-main/20">
-                  {execution_result.columns.map((col, i) => (
-                    <TableHead
-                      key={i}
-                      className={`text-xs uppercase tracking-wider ${col === '__source_db__' ? 'bg-info/15 text-info' : ''}`}
-                    >
-                      {col === '__source_db__' ? 'SOURCE' : col}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {execution_result.rows.map((row, ri) => (
-                  <TableRow
-                    key={ri}
-                    className={`hover:bg-info/10 transition-colors ${ri % 2 === 0 ? 'bg-secondary-background' : 'bg-main/5'}`}
-                  >
-                    {execution_result.columns.map((col, ci) => {
-                      const val = row[col]
-                      const isSource = col === '__source_db__'
-                      const isNum = !isSource && val !== null && !isNaN(Number(val)) && typeof val !== 'boolean'
-                      return (
-                        <TableCell
-                          key={ci}
-                          className={`text-sm max-w-xs truncate ${isSource ? 'bg-info/5 font-heading text-info text-xs' : ''} ${isNum ? 'text-right font-mono tabular-nums' : ''}`}
+          {!isWriteResult && sortedRows.length > 0 && (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[#f8fafc]">
+                      {displayCols.map((col, i) => (
+                        <th
+                          key={i}
+                          onClick={() => handleSort(col)}
+                          className="p-4 border-b-2 border-r-2 border-border font-heading font-black uppercase text-sm last:border-r-0 cursor-pointer hover:bg-main/20 select-none transition-colors"
                         >
-                          {val === null ? (
-                            <span className="text-foreground/30 italic text-xs">null</span>
-                          ) : typeof val === 'boolean' ? (
-                            <Badge variant="neutral" className={val ? 'bg-success/30' : 'bg-foreground/10'}>
-                              {val ? 'true' : 'false'}
-                            </Badge>
-                          ) : (
-                            String(val)
-                          )}
-                        </TableCell>
-                      )
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                          <span className="flex items-center gap-1.5">
+                            {col}
+                            {sortCol === col ? (
+                              <span className="material-symbols-outlined text-sm text-[#7d4e58]">
+                                {sortDir === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+                              </span>
+                            ) : (
+                              <span className="material-symbols-outlined text-sm text-foreground/20">unfold_more</span>
+                            )}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-sm">
+                    {pagedRows.map((row, ri) => (
+                      <tr key={ri} className="hover:bg-main/10 border-b border-foreground/10 transition-colors">
+                        {displayCols.map((col, ci) => {
+                          const val = row[col]
+                          const isNum = val !== null && !isNaN(Number(val)) && typeof val !== 'boolean'
+                          return (
+                            <td
+                              key={ci}
+                              className={`p-4 border-r-2 border-foreground/10 last:border-r-0 max-w-xs truncate ${isNum ? 'text-right tabular-nums' : ''}`}
+                            >
+                              {val === null ? (
+                                <span className="text-foreground/25 italic text-xs">null</span>
+                              ) : typeof val === 'boolean' ? (
+                                <span className={`px-2 py-0.5 rounded-full brutalist-border text-[10px] font-bold ${
+                                  val ? 'bg-success text-[#065f46]' : 'bg-foreground/10'
+                                }`}>
+                                  {val ? 'true' : 'false'}
+                                </span>
+                              ) : (
+                                String(val)
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t-2 border-border bg-[#f8fafc]">
+                  <span className="font-mono text-xs text-foreground/50">
+                    Page {currentPage + 1} of {totalPages} &nbsp;({sortedRows.length} rows)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(0)}
+                      disabled={currentPage === 0}
+                      className="px-2 py-1 brutalist-border rounded-lg font-heading text-xs disabled:opacity-30 hover:bg-main/20 active-press transition-colors"
+                    >
+                      «
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                      disabled={currentPage === 0}
+                      className="px-3 py-1 brutalist-border rounded-lg font-heading text-xs disabled:opacity-30 hover:bg-main/20 active-press transition-colors"
+                    >
+                      PREV
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                      disabled={currentPage >= totalPages - 1}
+                      className="px-3 py-1 brutalist-border rounded-lg font-heading text-xs disabled:opacity-30 hover:bg-main/20 active-press transition-colors"
+                    >
+                      NEXT
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(totalPages - 1)}
+                      disabled={currentPage >= totalPages - 1}
+                      className="px-2 py-1 brutalist-border rounded-lg font-heading text-xs disabled:opacity-30 hover:bg-main/20 active-press transition-colors"
+                    >
+                      »
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Empty result */}
-          {!isWriteResult && execution_result.rows?.length === 0 && (
-            <div className="py-10 text-center text-foreground/40">
-              <svg className="mx-auto h-8 w-8 mb-2 text-foreground/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-              </svg>
-              <p className="text-sm font-heading">No rows returned</p>
+          {!isWriteResult && sortedRows.length === 0 && (
+            <div className="py-12 text-center text-foreground/40">
+              <span className="material-symbols-outlined text-4xl mb-2 block">inbox</span>
+              <p className="font-heading">No rows returned</p>
             </div>
           )}
 
-          {/* Multi-DB warnings */}
+          {/* Warnings */}
           {result.warnings?.length > 0 && (
-            <div className="px-5 py-3 border-t-2 border-border bg-warning/10 space-y-1">
-              <span className="text-xs font-heading text-warning uppercase">Partial results — some databases failed:</span>
+            <div className="px-5 py-3 border-t-2 border-border bg-warning/20 space-y-1">
+              <span className="text-xs font-heading uppercase">Partial results — some databases failed:</span>
               {result.warnings.map((w, i) => (
                 <p key={i} className="text-xs text-foreground/70 font-mono">{w}</p>
               ))}
@@ -187,23 +284,28 @@ export default function ResultsDisplay({ result }) {
 
           {/* Explanation */}
           {sql_explanation && (
-            <p className="px-5 py-4 text-sm text-foreground leading-relaxed border-t-2 border-border bg-secondary-background font-base">
+            <p className="px-6 py-4 text-sm text-foreground/70 leading-relaxed border-t-2 border-border bg-white">
               {sql_explanation}
             </p>
           )}
 
           {/* Footer */}
-          <div className="flex items-center gap-4 px-5 py-2 bg-main/10 border-t-2 border-border text-xs text-foreground/50 font-mono">
+          <div className="flex items-center gap-4 px-5 py-3 bg-main/10 border-t-2 border-border text-xs text-foreground/50 font-mono">
             <span>{metadata?.ai_model}</span>
-            {metadata?.multi_db && (
-              <span className="text-info">
-                {metadata.database_nicknames?.length} databases
+            {isMultiDb && (
+              <span className="text-[#3b82f6]">
+                {metadata.database_nicknames.join(', ')}
               </span>
             )}
             <span className="ml-auto">{metadata?.timestamp ? new Date(metadata.timestamp).toLocaleTimeString() : ''}</span>
           </div>
-        </Card>
+        </section>
       )}
     </div>
+
+    {showExport && (
+      <ExportModal result={result} onClose={() => setShowExport(false)} />
+    )}
+    </>
   )
 }

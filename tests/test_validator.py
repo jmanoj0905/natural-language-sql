@@ -33,6 +33,15 @@ class TestValidateBasic:
         with pytest.raises(QueryValidationError, match="Multiple"):
             validator.validate("SELECT 1; SELECT 2;")
 
+    def test_write_then_select_allowed(self, validator):
+        sql = "UPDATE products SET price = price * 1.1 WHERE category = 'A'; SELECT * FROM products;"
+        result = validator.validate(sql)
+        assert "UPDATE" in result and "SELECT" in result
+
+    def test_select_then_write_raises(self, validator):
+        with pytest.raises(QueryValidationError, match="Multiple"):
+            validator.validate("SELECT * FROM products; UPDATE products SET price = 1;")
+
     def test_insert_passes(self, validator):
         result = validator.validate("INSERT INTO users (name) VALUES ('bob');")
         assert "INSERT" in result

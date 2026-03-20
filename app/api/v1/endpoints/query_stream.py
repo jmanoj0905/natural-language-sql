@@ -159,11 +159,15 @@ async def natural_language_query_stream(
                         sample_rows=3,
                     )
                     elapsed = round((time.perf_counter() - t0) * 1000)
+                    table_count = schema_context.count("CREATE TABLE")
+                    schema_msg = f"Loaded {table_count} table{'s' if table_count != 1 else ''}"
+                    if table_count >= 50:
+                        schema_msg += " (truncated — showing first 50)"
                     yield sse_event("progress", {
                         "stage": "schema",
                         "status": "completed",
                         "duration_ms": elapsed,
-                        "message": "Schema loaded",
+                        "message": schema_msg,
                     })
 
                     # --- Stage 3: AI Generate ---
@@ -180,7 +184,6 @@ async def natural_language_query_stream(
                         question=request.question,
                         schema_context=schema_context,
                         database_type=database_type,
-                        max_limit=settings.MAX_QUERY_RESULTS,
                         read_only=request.options.read_only,
                     )
                     response_text = await ai_client.generate_content(prompt)
@@ -210,11 +213,7 @@ async def natural_language_query_stream(
                     # --- Stage 4: Validate ---
                     yield sse_event("progress", {"stage": "validate", "status": "in_progress"})
                     t0 = time.perf_counter()
-                    validated_sql = validator.validate(
-                        sql,
-                        read_only=request.options.read_only,
-                        original_question=request.question,
-                    )
+                    validated_sql = validator.validate(sql)
                     elapsed = round((time.perf_counter() - t0) * 1000)
                     yield sse_event("progress", {
                         "stage": "validate",
@@ -351,11 +350,15 @@ async def natural_language_query_stream(
                 sample_rows=3,
             )
             elapsed = round((time.perf_counter() - t0) * 1000)
+            table_count = schema_context.count("CREATE TABLE")
+            schema_msg = f"Loaded {table_count} table{'s' if table_count != 1 else ''} from {nicknames[primary_id]}"
+            if table_count >= 50:
+                schema_msg += " (truncated — showing first 50)"
             yield sse_event("progress", {
                 "stage": "schema",
                 "status": "completed",
                 "duration_ms": elapsed,
-                "message": f"Schema loaded from {nicknames[primary_id]}",
+                "message": schema_msg,
             })
 
             # --- Stage 3: AI Generate (once) ---
@@ -372,7 +375,6 @@ async def natural_language_query_stream(
                 question=request.question,
                 schema_context=schema_context,
                 database_type=database_type,
-                max_limit=settings.MAX_QUERY_RESULTS,
                 read_only=request.options.read_only,
             )
             response_text = await ai_client.generate_content(prompt)
@@ -402,11 +404,7 @@ async def natural_language_query_stream(
             # --- Stage 4: Validate (once) ---
             yield sse_event("progress", {"stage": "validate", "status": "in_progress"})
             t0 = time.perf_counter()
-            validated_sql = validator.validate(
-                sql,
-                read_only=request.options.read_only,
-                original_question=request.question,
-            )
+            validated_sql = validator.validate(sql)
             elapsed = round((time.perf_counter() - t0) * 1000)
             yield sse_event("progress", {
                 "stage": "validate",

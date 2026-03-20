@@ -2,6 +2,7 @@
 
 import time
 import asyncio
+import sqlparse
 from typing import List, Dict, Any, Tuple
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -59,7 +60,8 @@ class QueryExecutor:
 
             execution_time_ms = (time.time() - start_time) * 1000
 
-            logger.info(
+            log = logger.warning if execution_time_ms > 5000 else logger.info
+            log(
                 "query_executed",
                 execution_time_ms=round(execution_time_ms, 2),
                 row_count=len(result),
@@ -110,6 +112,23 @@ class QueryExecutor:
         Returns:
             List of result rows as dictionaries (or affected row info for write operations)
         """
+        parsed = sqlparse.parse(sql.strip())
+
+        # Compound write + SELECT: execute write first, then return SELECT results
+        if len(parsed) == 2:
+            stmt1_sql = str(parsed[0]).strip()
+            stmt2_sql = str(parsed[1]).strip()
+            if any(stmt1_sql.upper().startswith(op) for op in ('UPDATE', 'INSERT', 'DELETE')):
+                write_result = await connection.execute(text(stmt1_sql))
+                affected = write_result.rowcount
+                logger.info("compound_write_select", affected_rows=affected)
+                select_result = await connection.execute(text(stmt2_sql))
+                rows = select_result.mappings().all()
+                return [
+                    {col: self._serialize_value(val) for col, val in row.items()}
+                    for row in rows
+                ]
+
         # Execute query
         result = await connection.execute(text(sql))
 
