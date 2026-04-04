@@ -128,16 +128,28 @@ function App() {
     }, 15000)
     // Save interval ID to clear later
     window.__tunnelHeartbeatInterval = heartbeatInterval
-    
-    // Show database selector after key generated and connector connects
-    setTimeout(() => {
-      setTunnelDbSelectorOpen(true)
-    }, 3000)
+  }
+
+  // Show database selector manually via button, not auto
+  const handleShowDbSelector = () => {
+    loadTunnelDatabases()
+    setTunnelDbSelectorOpen(true)
   }
 
   const handleTunnelDatabasesSelected = (selectedDbIds) => {
-    // Add selected tunnel databases to selectedDbIds
-    setSelectedDbIds(prev => [...prev, ...selectedDbIds])
+    // Add selected tunnel databases to selectedDbIds (only add new ones not already selected)
+    setSelectedDbIds(prev => {
+      const existing = new Set(prev)
+      const newIds = selectedDbIds.filter(id => !existing.has(id))
+      return [...prev, ...newIds]
+    })
+  }
+
+  const handleRemoveTunnelDb = (dbId) => {
+    // Remove from selected
+    setSelectedDbIds(prev => prev.filter(id => id !== dbId))
+    // Also remove from tunnelDatabases display list
+    setTunnelDatabases(prev => prev.filter(db => db.database_id !== dbId))
   }
 
   // Load tunnel databases periodically
@@ -262,6 +274,8 @@ function App() {
           selectedDbIds={selectedDbIds}
           onSelectionChange={handleSelectionChange}
           onDatabasesChanged={loadDatabases}
+          onRemoveTunnelDb={handleRemoveTunnelDb}
+          onShowTunnelSelector={handleShowDbSelector}
         />
 
         {/* Main Content */}

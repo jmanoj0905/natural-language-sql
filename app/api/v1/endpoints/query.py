@@ -17,6 +17,14 @@ from app.core.database.connection_manager import (
     DatabaseConnectionManager,
 )
 from app.core.ai.ollama_sql_generator import SQLGenerator
+from app.core.ai.ollama_client import get_ollama_client
+from app.core.ai.prompts import (
+    build_sql_generation_prompt,
+    extract_sql_from_response,
+    extract_explanation_from_response,
+    build_explanation,
+)
+from app.core.ai.query_planner import get_intent_detector
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
 from app.core.tunnel.query_router import get_query_router
@@ -95,10 +103,54 @@ async def handle_tunnel_query(
         )
 
     try:
-        # Generate SQL using local schema info (we need to get schema from tunnel)
-        # For now, use a simplified approach - generate without schema
-        sql = f"-- Query for {db_name}: {request.question}"
-        explanation = f"Query for database '{db_name}' on machine {machine_id}"
+        # Fetch schema from the tunnel machine
+        schema_result = await query_router.route_query(
+            database_id=database_id, sql="", request_type="schema"
+        )
+        if not schema_result.get("success"):
+            raise NLSQLException(
+                message=schema_result.get("error", "Failed to fetch schema from tunnel"),
+                code="SCHEMA_FETCH_FAILED",
+            )
+
+        raw_schema = schema_result.get("schema", {})
+        schema_lines = [f"-- Database: {db_name}\n"]
+        for table_name, info in raw_schema.items():
+            col_defs = []
+            for col in info.get("columns", []):
+                null_str = "" if col.get("nullable", True) else " NOT NULL"
+                default_str = f" DEFAULT {col['default']}" if col.get("default") else ""
+                col_defs.append(f"  {col['name']} {col['type']}{null_str}{default_str}")
+            schema_lines.append(
+                f"CREATE TABLE {table_name} (\n" + ",\n".join(col_defs) + "\n);\n"
+            )
+        schema_context = "\n".join(schema_lines)
+
+        # Generate SQL with Ollama using the fetched schema
+        database_type = "MySQL" if (db_type or "").lower() == "mysql" else "PostgreSQL"
+        intent_detector = get_intent_detector()
+        query_plan = intent_detector.detect_intent(question=request.question, registered_dbs=[])
+        intent_context = {
+            "intent": query_plan.intent.value,
+            "database_refs": query_plan.database_refs,
+            "needs_decomposition": query_plan.needs_decomposition,
+        }
+        prompt = build_sql_generation_prompt(
+            question=request.question,
+            schema_context=schema_context,
+            database_type=database_type,
+            read_only=request.options.read_only,
+            intent_context=intent_context,
+        )
+        ai_client = get_ollama_client()
+        response_text = await ai_client.generate_content(prompt)
+        sql = extract_sql_from_response(response_text)
+        if not sql:
+            raise NLSQLException(
+                message="Failed to extract SQL from AI response",
+                code="AI_PARSE_ERROR",
+            )
+        explanation = extract_explanation_from_response(response_text) or build_explanation(request.question, sql)
 
         if request.options.execute:
             result = await execute_tunnel_query(

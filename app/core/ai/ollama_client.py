@@ -68,19 +68,75 @@ class OllamaClient:
         if last_exception:
             raise last_exception
 
+    async def _generate_hf(self, prompt: str) -> str:
+        """Generate content via HuggingFace Inference API (OpenAI-compatible endpoint)."""
+        if not self.settings.HF_API_TOKEN:
+            raise AIAPIError(
+                "HF_API_TOKEN is not set. Add it to your environment variables."
+            )
+
+        # Strip the trailing ```sql seed — chat completions handles the template
+        clean_prompt = prompt.rstrip()
+        if clean_prompt.endswith("```sql"):
+            clean_prompt = clean_prompt[: -len("```sql")].rstrip()
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                "https://api-inference.huggingface.co/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.settings.HF_API_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.settings.HF_MODEL,
+                    "messages": [{"role": "user", "content": clean_prompt}],
+                    "temperature": 0,
+                    "max_tokens": 512,
+                    "stream": False,
+                },
+            )
+
+        if response.status_code == 503:
+            raise AIAPIError(
+                "HuggingFace model is loading. Wait ~20 seconds and try again."
+            )
+        if response.status_code == 429:
+            raise AIAPIError(
+                "HuggingFace rate limit reached. Wait a moment and try again."
+            )
+        if response.status_code != 200:
+            raise AIAPIError(
+                f"HuggingFace API returned {response.status_code}: {response.text[:300]}"
+            )
+
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        if not content:
+            raise AIAPIError("Empty response from HuggingFace API")
+
+        logger.debug(
+            "hf_content_generated",
+            model=self.settings.HF_MODEL,
+            prompt_length=len(clean_prompt),
+            response_length=len(content),
+        )
+
+        return content
+
     async def generate_content(self, prompt: str) -> str:
         """
-        Generate content using Ollama API with retry logic.
+        Generate content using the configured inference provider.
 
-        Args:
-            prompt: Input prompt
-
-        Returns:
-            str: Generated content
-
-        Raises:
-            AIAPIError: If API call fails after all retries
+        Routes to HuggingFace or Ollama based on INFERENCE_PROVIDER setting.
         """
+        if self.settings.INFERENCE_PROVIDER == "huggingface":
+            try:
+                return await self._generate_hf(prompt)
+            except AIAPIError:
+                raise
+            except Exception as e:
+                raise AIAPIError(f"HuggingFace generation failed: {str(e)}")
 
         async def _make_request():
             async with httpx.AsyncClient(timeout=300.0) as client:

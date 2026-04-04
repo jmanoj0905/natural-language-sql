@@ -26,6 +26,8 @@ export default function AppSidebar({
   selectedDbIds,
   onSelectionChange,
   onDatabasesChanged,
+  onRemoveTunnelDb,
+  onShowTunnelSelector,
 }) {
   const { showSuccess, showError } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
@@ -165,6 +167,16 @@ export default function AppSidebar({
         Connect New
       </button>
 
+      {/* Add More from Tunnel - shows available unselected DBs */}
+      {typeof onShowTunnelSelector === 'function' && (
+        <button
+          onClick={onShowTunnelSelector}
+          className="w-full brutalist-border bg-white py-2 rounded-xl font-heading font-bold uppercase tracking-widest text-xs hover:bg-[#f1f5f9] transition-all"
+        >
+          + Add from Local
+        </button>
+      )}
+
       {/* Search */}
       {databases.length > 3 && (
         <div className="relative">
@@ -225,7 +237,15 @@ export default function AppSidebar({
               {/* Hover actions */}
               <div className="flex items-center gap-1 px-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                 {isTunnel ? (
-                  <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>
+                  <>
+                    <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>
+                    <button 
+                      onClick={() => onRemoveTunnelDb?.(db.database_id)} 
+                      className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-danger rounded-lg transition-colors ml-auto"
+                    >
+                      Del
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>

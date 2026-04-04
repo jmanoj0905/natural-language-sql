@@ -29,6 +29,8 @@ from app.core.ai.query_planner import get_intent_detector
 from app.core.database.schema_inspector import SchemaInspector
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
+from app.core.tunnel.query_router import get_query_router
+from app.core.tunnel.registry import get_tunnel_registry
 from app.dependencies import get_query_validator, get_query_executor
 from app.exceptions import NLSQLException
 from app.config import get_settings
@@ -58,6 +60,281 @@ def _parse_db_ids(
     return []
 
 
+def _is_tunnel_id(db_id: str) -> bool:
+    return db_id.startswith("machine_")
+
+
+def _format_tunnel_schema(schema: dict, db_name: str) -> str:
+    """Convert connector schema dict into CREATE TABLE text for the AI prompt."""
+    lines = [f"-- Database: {db_name}\n"]
+    for table_name, info in schema.items():
+        col_defs = []
+        for col in info.get("columns", []):
+            null_str = "" if col.get("nullable", True) else " NOT NULL"
+            default_str = f" DEFAULT {col['default']}" if col.get("default") else ""
+            col_defs.append(f"  {col['name']} {col['type']}{null_str}{default_str}")
+        lines.append(
+            f"CREATE TABLE {table_name} (\n" + ",\n".join(col_defs) + "\n);\n"
+        )
+    return "\n".join(lines)
+
+
+async def _tunnel_db_generator(
+    tunnel_ids: List[str],
+    request: NaturalLanguageQueryRequest,
+    validator: QueryValidator,
+    settings,
+):
+    """SSE generator for tunnel (local) databases — mirrors the regular 5-stage flow."""
+    query_router = get_query_router()
+    registry = get_tunnel_registry()
+    ai_client = get_ollama_client()
+    intent_detector = get_intent_detector()
+    multi_db = len(tunnel_ids) > 1
+
+    # Parse the primary (first) tunnel ID for schema + AI generation
+    primary_id = tunnel_ids[0]
+    machine_id, db_type, db_name = query_router.parse_database_id(primary_id)
+
+    if not machine_id:
+        yield sse_event(
+            "error",
+            {
+                "stage": "connect",
+                "error": f"Invalid tunnel database ID: {primary_id}",
+                "code": "INVALID_DATABASE_ID",
+            },
+        )
+        return
+
+    try:
+        # --- Stage 1: Connect (verify machine is online) ---
+        yield sse_event("progress", {"stage": "connect", "status": "in_progress"})
+        t0 = time.perf_counter()
+
+        machine = registry.get_machine(machine_id)
+        if not machine or not machine.is_connected:
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": f"Machine {machine_id} is not connected. Please run nlsql-connector.",
+                    "code": "MACHINE_OFFLINE",
+                },
+            )
+            return
+
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        yield sse_event(
+            "progress",
+            {
+                "stage": "connect",
+                "status": "completed",
+                "duration_ms": elapsed,
+                "message": f"Connected to {machine_id}",
+            },
+        )
+
+        # --- Stage 2: Schema (fetch from tunnel machine) ---
+        yield sse_event("progress", {"stage": "schema", "status": "in_progress"})
+        t0 = time.perf_counter()
+
+        schema_result = await query_router.route_query(
+            database_id=primary_id, sql="", request_type="schema"
+        )
+
+        if not schema_result.get("success"):
+            yield sse_event(
+                "error",
+                {
+                    "stage": "schema",
+                    "error": schema_result.get("error", "Failed to fetch schema from tunnel"),
+                    "code": "SCHEMA_FETCH_FAILED",
+                },
+            )
+            return
+
+        raw_schema = schema_result.get("schema", {})
+        schema_context = _format_tunnel_schema(raw_schema, db_name)
+        table_count = len(raw_schema)
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        yield sse_event(
+            "progress",
+            {
+                "stage": "schema",
+                "status": "completed",
+                "duration_ms": elapsed,
+                "message": f"Loaded {table_count} table{'s' if table_count != 1 else ''} from {db_name}",
+            },
+        )
+
+        # --- Stage 3: AI Generate ---
+        yield sse_event(
+            "progress",
+            {"stage": "ai", "status": "in_progress", "message": "Waiting for Ollama..."},
+        )
+        t0 = time.perf_counter()
+
+        database_type = "MySQL" if (db_type or "").lower() == "mysql" else "PostgreSQL"
+        query_plan = intent_detector.detect_intent(question=request.question, registered_dbs=[])
+        intent_context = {
+            "intent": query_plan.intent.value,
+            "database_refs": query_plan.database_refs,
+            "needs_decomposition": query_plan.needs_decomposition,
+        }
+
+        prompt = build_sql_generation_prompt(
+            question=request.question,
+            schema_context=schema_context,
+            database_type=database_type,
+            read_only=request.options.read_only,
+            intent_context=intent_context,
+        )
+        response_text = await ai_client.generate_content(prompt)
+        logger.debug("tunnel_ollama_raw_response", response=response_text)
+        sql = extract_sql_from_response(response_text)
+        explanation = extract_explanation_from_response(response_text)
+        if not explanation and sql:
+            explanation = build_explanation(request.question, sql)
+
+        if not sql:
+            logger.error("tunnel_sql_extraction_failed", response=response_text)
+            yield sse_event(
+                "error",
+                {
+                    "stage": "ai",
+                    "error": "Failed to extract SQL from AI response",
+                    "raw_response": response_text[:500],
+                    "code": "AI_PARSE_ERROR",
+                },
+            )
+            return
+
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        yield sse_event("progress", {"stage": "ai", "status": "completed", "duration_ms": elapsed})
+
+        # --- Stage 4: Validate ---
+        yield sse_event("progress", {"stage": "validate", "status": "in_progress"})
+        t0 = time.perf_counter()
+        validated_sql = validator.validate(sql)
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        yield sse_event("progress", {"stage": "validate", "status": "completed", "duration_ms": elapsed})
+
+        # --- Stage 5: Execute ---
+        execution_result = None
+        if request.options.execute:
+            yield sse_event("progress", {"stage": "execute", "status": "in_progress"})
+            t0 = time.perf_counter()
+
+            if not multi_db:
+                exec_result = await query_router.route_query(
+                    database_id=primary_id, sql=validated_sql, request_type="query"
+                )
+                if not exec_result.get("success", True) and exec_result.get("error"):
+                    yield sse_event(
+                        "error",
+                        {
+                            "stage": "execute",
+                            "error": exec_result.get("error", "Query failed"),
+                            "code": exec_result.get("code", "TUNNEL_QUERY_ERROR"),
+                        },
+                    )
+                    return
+
+                rows = exec_result.get("rows", [])
+                columns = exec_result.get("columns", [])
+                if rows and not columns:
+                    columns = list(rows[0].keys())
+                execution_result = ExecutionResult(
+                    rows=rows,
+                    row_count=len(rows),
+                    execution_time_ms=round(exec_result.get("execution_time_ms", 0), 2),
+                    columns=columns,
+                )
+            else:
+                # Multi-tunnel fan-out
+                nicknames = {tid: tid.split(":")[-1] for tid in tunnel_ids}
+
+                async def _run_tunnel(tid):
+                    return await query_router.route_query(
+                        database_id=tid, sql=validated_sql, request_type="query"
+                    )
+
+                gather_results = await asyncio.gather(
+                    *[_run_tunnel(tid) for tid in tunnel_ids],
+                    return_exceptions=True,
+                )
+
+                merged_rows = []
+                warnings = []
+                original_columns = []
+                for tid, result in zip(tunnel_ids, gather_results):
+                    if isinstance(result, BaseException):
+                        warnings.append(f"{nicknames[tid]}: {result}")
+                    elif not result.get("success", True) and result.get("error"):
+                        warnings.append(f"{nicknames[tid]}: {result['error']}")
+                    else:
+                        rows = result.get("rows", [])
+                        if rows and not original_columns:
+                            original_columns = list(rows[0].keys())
+                        for row in rows:
+                            merged_rows.append({"__source_db__": nicknames[tid], **row})
+
+                if not merged_rows and warnings:
+                    yield sse_event(
+                        "error",
+                        {
+                            "stage": "execute",
+                            "error": "All tunnel executions failed",
+                            "details": warnings,
+                            "code": "MULTI_DB_ALL_FAILED",
+                        },
+                    )
+                    return
+
+                columns = (["__source_db__"] + original_columns) if merged_rows else []
+                execution_result = ExecutionResult(
+                    rows=merged_rows,
+                    row_count=len(merged_rows),
+                    execution_time_ms=0,
+                    columns=columns,
+                )
+
+            elapsed = round((time.perf_counter() - t0) * 1000)
+            yield sse_event("progress", {"stage": "execute", "status": "completed", "duration_ms": elapsed})
+        else:
+            yield sse_event("progress", {"stage": "execute", "status": "skipped"})
+
+        # --- Final result ---
+        db_nickname = f"{db_name} (local)" if not multi_db else None
+        query_response = QueryResponse(
+            success=True,
+            question=request.question,
+            generated_sql=validated_sql,
+            sql_explanation=explanation,
+            execution_result=execution_result,
+            metadata={
+                "database_id": primary_id if not multi_db else None,
+                "database_ids": tunnel_ids if multi_db else None,
+                "database_nickname": db_nickname,
+                "multi_db": multi_db,
+                "ai_model": settings.OLLAMA_MODEL,
+                "timestamp": datetime.now().isoformat(),
+                "executed": request.options.execute,
+                "is_tunnel": True,
+                "machine_id": machine_id,
+            },
+        )
+        yield sse_event("result", query_response.model_dump(mode="json"))
+
+    except NLSQLException as e:
+        logger.error("tunnel_stream_query_failed", error=str(e), error_code=e.code)
+        yield sse_event("error", {"stage": "unknown", "error": e.message, "code": e.code})
+    except Exception as e:
+        logger.error("tunnel_stream_unexpected_error", error=str(e), error_type=type(e).__name__)
+        yield sse_event("error", {"stage": "unknown", "error": str(e), "code": "INTERNAL_ERROR"})
+
+
 @router.post("/natural/stream")
 async def natural_language_query_stream(
     request: NaturalLanguageQueryRequest,
@@ -81,20 +358,11 @@ async def natural_language_query_stream(
     """
     ids = _parse_db_ids(database_ids, database_id, db_manager)
 
-    # --- Pre-stream validation ---
-    if not db_manager.is_configured:
-
-        async def error_stream():
-            yield sse_event(
-                "error",
-                {
-                    "stage": "connect",
-                    "error": "No database configured. Please add a database connection first.",
-                    "code": "DATABASE_NOT_CONFIGURED",
-                },
-            )
-
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
 
     if not ids:
 
@@ -108,7 +376,51 @@ async def natural_language_query_stream(
                 },
             )
 
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=sse_headers)
+
+    # Split tunnel vs regular database IDs
+    tunnel_ids = [i for i in ids if _is_tunnel_id(i)]
+    regular_ids = [i for i in ids if not _is_tunnel_id(i)]
+
+    # Cannot mix tunnel and direct databases in a single query
+    if tunnel_ids and regular_ids:
+
+        async def error_stream():
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": "Cannot mix tunnel (local) and direct databases in the same query.",
+                    "code": "MIXED_DB_TYPES",
+                },
+            )
+
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=sse_headers)
+
+    # --- Tunnel path ---
+    if tunnel_ids:
+        return StreamingResponse(
+            _tunnel_db_generator(tunnel_ids, request, validator, settings),
+            media_type="text/event-stream",
+            headers=sse_headers,
+        )
+
+    # --- Regular path: pre-stream validation ---
+    ids = regular_ids
+
+    if not db_manager.is_configured:
+
+        async def error_stream():
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": "No database configured. Please add a database connection first.",
+                    "code": "DATABASE_NOT_CONFIGURED",
+                },
+            )
+
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=sse_headers)
 
     known_ids = set(db_manager.list_databases())
     missing = [i for i in ids if i not in known_ids]
@@ -124,7 +436,7 @@ async def natural_language_query_stream(
                 },
             )
 
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=sse_headers)
 
     # All selected DBs must share the same db_type
     db_types = {db_manager.get_database_config(i).db_type for i in ids}
@@ -140,7 +452,7 @@ async def natural_language_query_stream(
                 },
             )
 
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=sse_headers)
 
     multi_db = len(ids) > 1
 

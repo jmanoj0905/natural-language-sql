@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     OLLAMA_TEMPERATURE: float = 0.1
     OLLAMA_BASE_URL: str = "http://localhost:11434"  # Ollama API endpoint
 
+    # AI Inference Provider: "ollama" (local) or "huggingface" (cloud, free)
+    INFERENCE_PROVIDER: str = "ollama"
+    HF_API_TOKEN: str = ""
+    HF_MODEL: str = "defog/llama-3-sqlcoder-8b"
+
     # Security Settings
     MAX_QUERY_RESULTS: int = 1000
     DEFAULT_QUERY_LIMIT: int = 100
