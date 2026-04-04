@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import { useAuth } from '@clerk/react'
 import { TUNNEL_ENDPOINTS } from '../config'
 
 export default function ConnectTunnelModal({ onClose, onKeyGenerated }) {
   const [key, setKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const { getToken, userId } = useAuth()
 
   const generateKey = async () => {
     setLoading(true)
     setError(null)
     try {
-      const resp = await axios.post(TUNNEL_ENDPOINTS.generateKey)
+      const token = await getToken()
+      const resp = await axios.post(TUNNEL_ENDPOINTS.generateKey, { user_id: userId }, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       setKey(resp.data.key)
       onKeyGenerated(resp.data.key)
     } catch (err) {

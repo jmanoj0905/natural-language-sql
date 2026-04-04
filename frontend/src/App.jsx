@@ -11,6 +11,7 @@ import TunnelStatus from './components/TunnelStatus'
 import TunnelDatabaseSelector from './components/TunnelDatabaseSelector'
 import { useToast } from './hooks/useToast.jsx'
 import { API_BASE, TUNNEL_ENDPOINTS } from './config'
+import { Show, SignInButton, UserButton } from '@clerk/react'
 
 function App() {
   useToast()
@@ -220,111 +221,144 @@ function App() {
       <header className="flex justify-between items-center w-full px-6 h-16 sticky top-0 z-50 bg-white border-b-2 border-border">
         <div className="flex items-center gap-8">
           <span className="text-2xl font-black text-foreground uppercase font-heading tracking-tight">NLSQL</span>
-          <nav className="hidden md:flex gap-6 items-center">
-            <button className={navLinkClass('query')} onClick={() => setActiveTab('query')}>Query</button>
-            <button className={navLinkClass('history')} onClick={() => setActiveTab('history')}>History</button>
-          </nav>
+          <Show when="signed-in">
+            <nav className="hidden md:flex gap-6 items-center">
+              <button className={navLinkClass('query')} onClick={() => setActiveTab('query')}>Query</button>
+              <button className={navLinkClass('history')} onClick={() => setActiveTab('history')}>History</button>
+            </nav>
+          </Show>
         </div>
         <div className="flex items-center gap-3">
-          {/* AI / Raw SQL mode toggle */}
-          <button
-            onClick={() => setAiMode(prev => !prev)}
-            className={`flex items-center gap-2 px-4 py-1.5 font-mono text-xs brutalist-border font-bold rounded-full uppercase transition-all active-press cursor-pointer select-none ${
-              aiMode
-                ? 'bg-success text-[#065f46] soft-shadow'
-                : 'bg-[#1a1c1d] text-success soft-shadow'
-            }`}
-          >
-            <span className={`material-symbols-outlined text-sm ${!aiMode ? 'text-success' : ''}`}>
-              {aiMode ? 'smart_toy' : 'code'}
-            </span>
-            {aiMode ? 'AI Mode' : 'Raw SQL'}
-          </button>
+          <Show when="signed-in">
+            {/* AI / Raw SQL mode toggle */}
+            <button
+              onClick={() => setAiMode(prev => !prev)}
+              className={`flex items-center gap-2 px-4 py-1.5 font-mono text-xs brutalist-border font-bold rounded-full uppercase transition-all active-press cursor-pointer select-none ${
+                aiMode
+                  ? 'bg-success text-[#065f46] soft-shadow'
+                  : 'bg-[#1a1c1d] text-success soft-shadow'
+              }`}
+            >
+              <span className={`material-symbols-outlined text-sm ${!aiMode ? 'text-success' : ''}`}>
+                {aiMode ? 'smart_toy' : 'code'}
+              </span>
+              {aiMode ? 'AI Mode' : 'Raw SQL'}
+            </button>
 
-          <DatabaseStatus databases={databases} />
-          <button
-            onClick={() => setTunnelModalOpen(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-heading border-2 border-border rounded-full hover:bg-[#e2e8f0] transition-colors"
-            title="Connect local database"
-          >
-            <span className="material-symbols-outlined text-sm">hub</span>
-            <span className="hidden sm:inline">Connect</span>
-          </button>
-          <button
-            onClick={loadDatabases}
-            className="material-symbols-outlined p-2 text-foreground hover:bg-[#e2e8f0] transition-colors rounded-full active:translate-x-[1px] active:translate-y-[1px]"
-            title="Reload"
-          >
-            refresh
-          </button>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="material-symbols-outlined p-2 text-foreground hover:bg-[#e2e8f0] transition-colors rounded-full active:translate-x-[1px] active:translate-y-[1px]"
-            title="Settings"
-          >
-            settings
-          </button>
+            <DatabaseStatus databases={databases} />
+            <button
+              onClick={() => setTunnelModalOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-heading border-2 border-border rounded-full hover:bg-[#e2e8f0] transition-colors"
+              title="Connect local database"
+            >
+              <span className="material-symbols-outlined text-sm">hub</span>
+              <span className="hidden sm:inline">Connect</span>
+            </button>
+            <button
+              onClick={loadDatabases}
+              className="material-symbols-outlined p-2 text-foreground hover:bg-[#e2e8f0] transition-colors rounded-full active:translate-x-[1px] active:translate-y-[1px]"
+              title="Reload"
+            >
+              refresh
+            </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="material-symbols-outlined p-2 text-foreground hover:bg-[#e2e8f0] transition-colors rounded-full active:translate-x-[1px] active:translate-y-[1px]"
+              title="Settings"
+            >
+              settings
+            </button>
+            <UserButton />
+          </Show>
+
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <button className="px-4 py-1.5 text-sm font-heading font-bold border-2 border-border rounded-full hover:bg-[#e2e8f0] transition-colors cursor-pointer">
+                Sign In
+              </button>
+            </SignInButton>
+          </Show>
         </div>
       </header>
 
-      <div className="flex">
-        {/* Sidebar */}
-        <AppSidebar
-          databases={allDatabases}
-          selectedDbIds={selectedDbIds}
-          onSelectionChange={handleSelectionChange}
-          onDatabasesChanged={loadDatabases}
-          onRemoveTunnelDb={handleRemoveTunnelDb}
-          onShowTunnelSelector={handleShowDbSelector}
-        />
+      <Show when="signed-in">
+        <div className="flex">
+          {/* Sidebar */}
+          <AppSidebar
+            databases={allDatabases}
+            selectedDbIds={selectedDbIds}
+            onSelectionChange={handleSelectionChange}
+            onDatabasesChanged={loadDatabases}
+            onRemoveTunnelDb={handleRemoveTunnelDb}
+            onShowTunnelSelector={handleShowDbSelector}
+          />
 
-        {/* Main Content */}
-        <main className="ml-64 w-full min-h-[calc(100vh-64px)] p-8 hatch-pattern">
-          <div className="max-w-6xl mx-auto space-y-8">
-            {activeTab === 'query' && (
-              <>
-                <QueryInterface
-                  onResult={handleQueryResult}
-                  databases={allDatabases}
-                  selectedDbIds={selectedDbIds}
-                  onDatabaseSelectionChange={handleSelectionChange}
-                  aiMode={aiMode}
-                />
-                {currentResult && <ResultsDisplay result={currentResult} />}
-              </>
-            )}
-            {activeTab === 'history' && (
-              <QueryHistory history={queryHistory} />
-            )}
+          {/* Main Content */}
+          <main className="ml-64 w-full min-h-[calc(100vh-64px)] p-8 hatch-pattern">
+            <div className="max-w-6xl mx-auto space-y-8">
+              {activeTab === 'query' && (
+                <>
+                  <QueryInterface
+                    onResult={handleQueryResult}
+                    databases={allDatabases}
+                    selectedDbIds={selectedDbIds}
+                    onDatabaseSelectionChange={handleSelectionChange}
+                    aiMode={aiMode}
+                  />
+                  {currentResult && <ResultsDisplay result={currentResult} />}
+                </>
+              )}
+              {activeTab === 'history' && (
+                <QueryHistory history={queryHistory} />
+              )}
 
-            <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
-              <div>ENGINE: CLOUD | MODE: AI</div>
-              <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
-            </footer>
+              <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
+                <div>ENGINE: CLOUD | MODE: AI</div>
+                <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
+              </footer>
+            </div>
+          </main>
+        </div>
+      </Show>
+
+      <Show when="signed-out">
+        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] hatch-pattern">
+          <div className="brutalist-border bg-white soft-shadow-lg rounded-2xl p-10 max-w-md w-full mx-4 text-center space-y-6">
+            <div className="space-y-2">
+              <h1 className="text-3xl font-black uppercase font-heading tracking-tight">NLSQL</h1>
+              <p className="text-sm text-foreground/60 font-body">Natural language queries for your databases.</p>
+            </div>
+            <SignInButton mode="modal">
+              <button className="w-full px-6 py-3 bg-[#1a1c1d] text-white font-heading font-bold text-sm rounded-base hover:bg-[#333] transition-colors cursor-pointer">
+                Sign In to Continue
+              </button>
+            </SignInButton>
           </div>
-        </main>
-      </div>
+        </div>
+      </Show>
 
-      {settingsOpen && (
-        <SettingsModal
-          onClose={() => setSettingsOpen(false)}
-          onClearHistory={() => setQueryHistory([])}
-        />
-      )}
+      <Show when="signed-in">
+        {settingsOpen && (
+          <SettingsModal
+            onClose={() => setSettingsOpen(false)}
+            onClearHistory={() => setQueryHistory([])}
+          />
+        )}
 
-      {tunnelModalOpen && (
-        <ConnectTunnelModal
-          onClose={() => setTunnelModalOpen(false)}
-          onKeyGenerated={handleTunnelKeyGenerated}
-        />
-      )}
+        {tunnelModalOpen && (
+          <ConnectTunnelModal
+            onClose={() => setTunnelModalOpen(false)}
+            onKeyGenerated={handleTunnelKeyGenerated}
+          />
+        )}
 
-      {tunnelDbSelectorOpen && (
-        <TunnelDatabaseSelector
-          onClose={() => setTunnelDbSelectorOpen(false)}
-          onDatabasesSelected={handleTunnelDatabasesSelected}
-        />
-      )}
+        {tunnelDbSelectorOpen && (
+          <TunnelDatabaseSelector
+            onClose={() => setTunnelDbSelectorOpen(false)}
+            onDatabasesSelected={handleTunnelDatabasesSelected}
+          />
+        )}
+      </Show>
     </div>
   )
 }
