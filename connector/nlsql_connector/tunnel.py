@@ -37,13 +37,17 @@ class TunnelClient:
     async def connect(self) -> bool:
         """Connect to the backend WebSocket."""
         try:
+            # Convert https to wss for WebSocket
+            ws_url = self.backend_url.replace("https://", "wss://").replace(
+                "http://", "ws://"
+            )
             self.websocket = await websockets.connect(
-                f"{self.backend_url}/ws/tunnel",
+                f"{ws_url}/ws/tunnel",
                 ping_interval=20,
                 ping_timeout=10,
             )
             if self.verbose:
-                print(f"Connected to {self.backend_url}/ws/tunnel")
+                print(f"Connected to {ws_url}/ws/tunnel")
             return True
         except Exception as e:
             print(f"Failed to connect: {e}")

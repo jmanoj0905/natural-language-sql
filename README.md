@@ -30,6 +30,71 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 - **Query history** — Every query saved for the session with SQL, explanation, row count, and timing.
 - **Encrypted credentials** — Database passwords stored with Fernet encryption in `~/.nlsql/databases.json`.
 - **Schema-aware AI** — Prompt includes CREATE TABLE statements, foreign key relationships, and 3 sample rows per table for accurate SQL generation.
+- **Connect local databases** — Use `nlsql-connector` to expose your local Postgres/MySQL to the cloud backend (see below).
+
+---
+
+## Connect Local Databases (Tunnel)
+
+You can connect your local databases running on `localhost` to a cloud-deployed NLSQL backend. This is useful when:
+
+- Backend is deployed (e.g., on Render)
+- Database is on your local machine (behind firewall/router)
+
+### How It Works
+
+```mermaid
+flowchart LR
+    subgraph User["Your Machine"]
+        PG[PostgreSQL<br/>:5432] --> CD[nlsql-connector]
+        MY[MySQL<br/>:3306] --> CD
+    end
+    
+    CD -.-> |WebSocket| BE[Cloud Backend<br/>NLSQL]
+    
+    BE --> |Queries| CD
+    CD --> |Results| BE
+```
+
+The `nlsql-connector` runs on your machine, auto-discovers local databases, and creates a secure WebSocket tunnel to the backend.
+
+### Step-by-Step
+
+1. **Open NLSQL in your browser** (e.g., https://your-nlsql-deployment.onrender.com)
+2. **Click the "Connect" button** in the header
+3. **Copy the key** shown (e.g., `nlsql_key_xxx`)
+4. **Install and run the connector** on your machine:
+
+```bash
+# Install
+pip install nlsql-connector
+
+# Run with your key
+nlsql-connector --key nlsql_key_xxx
+```
+
+5. **Your local databases appear** in the sidebar — select one and start querying!
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--key, -k` | **Required** — Tunnel key from frontend |
+| `--url, -u` | Backend URL (default: your deployed URL) |
+| `--verbose, -v` | Debug output |
+| `--no-discover` | Skip auto-discovery, use defaults |
+
+### Key Behavior
+
+- **Same key persists** — If you close the browser and come back, the same key reconnects automatically
+- **Force close** — If you crash or force-quit the connector, the key is invalidated (regenerate from frontend)
+- **Multiple machines** — You can run connectors on multiple machines; each gets its own key; all databases appear in the sidebar
+
+### Troubleshooting
+
+- **"Failed to connect"** — Check your network, verify the backend URL is correct
+- **"Registration failed"** — The key may have expired; generate a new one from the frontend
+- **"No databases discovered"** — Use `--no-discover` to use default config, or ensure PostgreSQL/MySQL is running on localhost
 
 ---
 
@@ -165,6 +230,29 @@ curl "http://localhost:8000/api/v1/schema?database_id=mydb"
 curl -X POST http://localhost:8000/api/v1/schema/cache/clear
 ```
 
+### Tunnel (Local Database Connector)
+
+```bash
+# Generate a new tunnel key (from frontend)
+curl -X POST http://localhost:8000/api/v1/tunnel/generate-key
+
+# Get connected machines status
+curl http://localhost:8000/api/v1/tunnel/status
+
+# Get available tunnel databases
+curl http://localhost:8000/api/v1/tunnel/available-databases
+
+# Send heartbeat (keeps key valid after browser close)
+curl -X POST http://localhost:8000/api/v1/tunnel/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"key": "nlsql_key_xxx"}'
+
+# Graceful disconnect (key remains valid)
+curl -X POST http://localhost:8000/api/v1/tunnel/disconnect \
+  -H "Content-Type: application/json" \
+  -d '{"key": "nlsql_key_xxx"}'
+```
+
 ---
 
 ## Project Structure
@@ -180,6 +268,7 @@ natural-lang-sql/
 │   │   ├── query_stream.py           # /query/natural/stream (SSE)
 │   │   ├── schema.py                 # /schema endpoints
 │   │   ├── database.py               # /databases CRUD
+│   │   ├── tunnel.py                 # /tunnel endpoints (WebSocket)
 │   │   └── health.py                 # /health endpoints
 │   └── core/
 │       ├── ai/
@@ -190,6 +279,10 @@ natural-lang-sql/
 │       │   ├── connection_manager.py # Engine pool, Fernet-encrypted credentials
 │       │   ├── schema_inspector.py   # Schema introspection with TTL cache
 │       │   └── adapters/             # PostgreSQL + MySQL adapters
+│       ├── tunnel/                   # Local database connector support
+│       │   ├── key_manager.py        # Tunnel key generation/validation
+│       │   ├── registry.py           # Machine connection state
+│       │   └── query_router.py       # Route queries to correct machine
 │       ├── query/
 │       │   ├── validator.py          # SQL validation, LIMIT enforcement
 │       │   └── executor.py           # Async execution with timeout
@@ -198,15 +291,23 @@ natural-lang-sql/
 ├── frontend/                         # React 18 + Vite SPA
 │   └── src/
 │       ├── App.jsx                   # Top nav, sidebar, tab routing
-│       ├── config.js                 # Shared API_BASE constant
+│       ├── config.js                 # Shared API_BASE + tunnel endpoints
 │       ├── components/
 │       │   ├── AppSidebar.jsx        # DB list, connect/edit/delete modals
 │       │   ├── QueryInterface.jsx    # NL input, SSE streaming, SQL preview
 │       │   ├── ResultsDisplay.jsx    # Sortable table, pagination, export
 │       │   ├── QueryHistory.jsx      # Session query history
-│       │   └── QueryProgress.jsx    # 5-stage pipeline indicator
+│       │   ├── QueryProgress.jsx    # 5-stage pipeline indicator
+│       │   ├── ConnectTunnelModal.jsx # Tunnel key generation UI
+│       │   └── TunnelStatus.jsx      # Connected machines display
 │       └── utils/
 │           └── sql.js                # detectWriteOp utility
+├── connector/                        # nlsql-connector (local DB tunnel agent)
+│   ├── nlsql_connector/
+│   │   ├── main.py                  # CLI entry point
+│   │   ├── discoverer.py            # Auto-discover local Postgres/MySQL
+│   │   └── tunnel.py                 # WebSocket client + query proxy
+│   └── pyproject.toml               # Package config
 ├── tests/                            # pytest test suite
 ├── requirements.txt
 ├── install.sh                        # One-command setup
@@ -217,23 +318,43 @@ natural-lang-sql/
 
 ## How it Works
 
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant B as Backend
+    participant O as Ollama
+    participant D as Database
+
+    U->>F: "show top 10 customers"
+    F->>B: POST /query/natural/stream
+    
+    rect rgb(240, 248, 255)
+        Note over B: [1] Connect
+        B->>D: Acquire async connection
+        D-->>B: Connection pool
+        
+        Note over B: [2] Schema
+        B->>D: Introspect tables/columns/FK
+        D-->>B: Schema + 3 sample rows
+        
+        Note over B: [3] AI
+        B->>O: POST /api/generate (prompt)
+        O-->>B: Generated SQL
+        
+        Note over B: [4] Validate
+        B->>B: sqlparse + injection scan
+        
+        Note over B: [5] Execute
+        B->>D: Run SQL query
+        D-->>B: Results
+    end
+    
+    B-->>F: SSE result event
+    F->>U: Render table
 ```
-User question
-    ↓
-POST /query/natural/stream (SSE)
-    ↓
-[connect]   — acquire async DB connection from pool
-    ↓
-[schema]    — introspect tables, columns, FK relationships, 3 sample rows (TTL cached)
-    ↓
-[ai]        — build prompt → POST to Ollama /api/generate → extract SQL from response
-    ↓
-[validate]  — sqlparse syntax check, LIMIT enforcement, injection pattern scan
-    ↓
-[execute]   — run via SQLAlchemy async, serialize results (Decimal, datetime, bytes)
-    ↓
-SSE result event → frontend renders table
-```
+
+User question → Frontend sends to Backend → Backend connects to DB → Fetches schema → Sends to Ollama → Validates SQL → Executes → Returns results via SSE → Frontend renders.
 
 ---
 

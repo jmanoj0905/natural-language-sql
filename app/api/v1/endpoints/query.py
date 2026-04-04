@@ -11,9 +11,6 @@ from app.models.query import (
     DirectSQLRequest,
     QueryResponse,
     ExecutionResult,
-    QueryPlanRequest,
-    QueryPlanResponse,
-    QueryStepModel,
 )
 from app.core.database.connection_manager import (
     get_db_manager,
@@ -507,85 +504,4 @@ async def explain_query(
         )
 
 
-# Multi-step query plan endpoint
-
-from app.models.query import QueryPlanRequest, QueryPlanResponse, QueryStepModel
-from app.core.ai.query_planner import get_intent_detector
-
-
-@router.post("/plan", response_model=QueryPlanResponse)
-async def create_query_plan(
-    request: QueryPlanRequest,
-    db_manager: DatabaseConnectionManager = Depends(get_db_manager),
-    sql_generator: SQLGenerator = Depends(get_sql_generator),
-) -> QueryPlanResponse:
-    """
-    Create a query plan from natural language without executing.
-
-    Returns a decomposed plan with suggestions for breaking up compound queries.
-    """
-    if not db_manager.is_configured:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "DATABASE_NOT_CONFIGURED",
-                "message": "No database configured",
-            },
-        )
-
-    registered_dbs = db_manager.list_databases()
-    intent_detector = get_intent_detector()
-
-    query_plan = intent_detector.detect_intent(
-        question=request.question,
-        registered_dbs=registered_dbs,
-    )
-
-    # For single-step queries, just return the intent
-    if not query_plan.needs_decomposition:
-        return QueryPlanResponse(
-            success=True,
-            intent=query_plan.intent.value,
-            steps=[
-                QueryStepModel(
-                    step=s.step,
-                    question=s.question,
-                    database_id=s.database_id,
-                    database_nickname=None,
-                    generated_sql=None,
-                    action=s.action,
-                    status="pending",
-                )
-                for s in query_plan.steps
-            ],
-            message="Single-step query. Use /query/natural instead.",
-            suggestions=[],
-            warning=None,
-        )
-
-    # For multi-step queries, return warning and suggestions instead of executing
-    warning_message = (
-        "Your query contains multiple parts that require separate execution. "
-        "This can lead to incomplete or incorrect results. "
-        "Please break down your query into smaller parts for accurate results."
-    )
-
-    return QueryPlanResponse(
-        success=True,
-        intent=query_plan.intent.value,
-        steps=[
-            QueryStepModel(
-                step=s.step,
-                question=s.question,
-                database_id=s.database_id,
-                database_nickname=None,
-                generated_sql=None,
-                action=s.action,
-                status="pending",
-            )
-            for s in query_plan.steps
-        ],
-        message="Multi-step query detected. See suggestions below.",
-        suggestions=query_plan.suggestions,
-        warning=warning_message,
-    )
+# Keep intent detection for better prompts (but remove multi-step endpoint)

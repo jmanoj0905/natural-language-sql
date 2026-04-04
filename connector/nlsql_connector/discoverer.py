@@ -47,16 +47,18 @@ class DatabaseDiscoverer:
 
         databases = []
         for result in results:
-            if isinstance(result, DiscoveredDatabase):
+            if isinstance(result, list):
+                databases.extend(result)
+            elif isinstance(result, DiscoveredDatabase):
                 databases.append(result)
 
         self.discovered = databases
         return databases
 
-    async def _check_postgres(self, port: int) -> Optional[DiscoveredDatabase]:
-        """Check if PostgreSQL is running on port."""
+    async def _check_postgres(self, port: int) -> List[DiscoveredDatabase]:
+        """Check if PostgreSQL is running on port and return ALL databases."""
         if not await self._is_port_open("localhost", port):
-            return None
+            return []
 
         try:
             # Try to connect to postgres database
@@ -76,21 +78,25 @@ class DatabaseDiscoverer:
             databases = [row["datname"] for row in rows]
             await conn.close()
 
-            return DiscoveredDatabase(
-                name=databases[0] if databases else "postgres",
-                db_type="postgresql",
-                host="localhost",
-                port=port,
-                username="postgres",
-                password="",
-            )
+            # Return ALL discovered databases, not just the first one
+            return [
+                DiscoveredDatabase(
+                    name=db_name,
+                    db_type="postgresql",
+                    host="localhost",
+                    port=port,
+                    username="postgres",
+                    password="",
+                )
+                for db_name in databases
+            ]
         except Exception:
-            return None
+            return []
 
-    async def _check_mysql(self, port: int) -> Optional[DiscoveredDatabase]:
-        """Check if MySQL is running on port."""
+    async def _check_mysql(self, port: int) -> List[DiscoveredDatabase]:
+        """Check if MySQL is running on port and return ALL databases."""
         if not await self._is_port_open("localhost", port):
-            return None
+            return []
 
         try:
             conn = await aiomysql.connect(
@@ -112,16 +118,20 @@ class DatabaseDiscoverer:
 
             conn.close()
 
-            return DiscoveredDatabase(
-                name=databases[0] if databases else "mysql",
-                db_type="mysql",
-                host="localhost",
-                port=port,
-                username="root",
-                password="",
-            )
+            # Return ALL discovered databases
+            return [
+                DiscoveredDatabase(
+                    name=db_name,
+                    db_type="mysql",
+                    host="localhost",
+                    port=port,
+                    username="root",
+                    password="",
+                )
+                for db_name in databases
+            ]
         except Exception:
-            return None
+            return []
 
     async def _is_port_open(self, host: str, port: int) -> bool:
         """Check if a port is open."""
