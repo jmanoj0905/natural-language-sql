@@ -3,7 +3,7 @@
 import time
 import asyncio
 import sqlparse
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from decimal import Decimal
@@ -11,6 +11,7 @@ from datetime import date, datetime
 
 from app.config import get_settings
 from app.exceptions import QueryExecutionError, QueryTimeoutError
+from app.core.query.error_humanizer import humanize_query_execution_error
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,18 +30,20 @@ class QueryExecutor:
         self,
         connection: AsyncConnection,
         sql: str,
-        timeout_seconds: int = None
-    ) -> Tuple[List[Dict[str, Any]], float]:
+        timeout_seconds: Optional[int] = None,
+        pagination: Optional[Dict[str, int]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float, Optional[int]]:
         """
-        Execute SQL query with timeout protection.
+        Execute SQL query with timeout protection and optional pagination.
 
         Args:
             connection: Database connection
             sql: Validated SQL query
             timeout_seconds: Query timeout (uses config default if not specified)
+            pagination: Optional dict with 'offset' and 'limit' keys
 
         Returns:
-            Tuple of (results, execution_time_ms)
+            Tuple of (results, execution_time_ms, total_rows)
 
         Raises:
             QueryTimeoutError: If query exceeds timeout
@@ -52,10 +55,9 @@ class QueryExecutor:
         start_time = time.time()
 
         try:
-            # Execute query with timeout
-            result = await asyncio.wait_for(
-                self._execute_query(connection, sql),
-                timeout=timeout_seconds
+            result, total_rows = await asyncio.wait_for(
+                self._execute_query(connection, sql, pagination),
+                timeout=timeout_seconds,
             )
 
             execution_time_ms = (time.time() - start_time) * 1000
@@ -65,10 +67,11 @@ class QueryExecutor:
                 "query_executed",
                 execution_time_ms=round(execution_time_ms, 2),
                 row_count=len(result),
-                sql=sql[:200]
+                total_rows=total_rows,
+                sql=sql[:200],
             )
 
-            return result, execution_time_ms
+            return result, execution_time_ms, total_rows
 
         except asyncio.TimeoutError:
             execution_time = time.time() - start_time
@@ -76,7 +79,7 @@ class QueryExecutor:
                 "query_timeout",
                 timeout_seconds=timeout_seconds,
                 execution_time_seconds=round(execution_time, 2),
-                sql=sql[:200]
+                sql=sql[:200],
             )
             raise QueryTimeoutError(timeout_seconds)
 
@@ -87,74 +90,122 @@ class QueryExecutor:
                 error=str(e),
                 error_type=type(e).__name__,
                 execution_time_ms=round(execution_time_ms, 2),
-                sql=sql[:200]
+                sql=sql[:200],
             )
+            human_message = humanize_query_execution_error(e, sql)
             raise QueryExecutionError(
-                f"Query execution failed: {str(e)}",
+                human_message,
                 details={
                     "error_type": type(e).__name__,
-                    "sql": sql[:200]
-                }
+                    "raw_error": str(e),
+                    "sql": sql[:200],
+                },
             )
+
+    async def execute_explain(
+        self, connection: AsyncConnection, sql: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get query execution plan (EXPLAIN) for debugging slow queries.
+
+        Args:
+            connection: Database connection
+            sql: SQL query to explain
+
+        Returns:
+            List of EXPLAIN output rows
+        """
+        explain_sql = f"EXPLAIN (FORMAT JSON) {sql}"
+        result = await connection.execute(text(explain_sql))
+        rows = result.mappings().all()
+
+        return [
+            {col: self._serialize_value(val) for col, val in row.items()}
+            for row in rows
+        ]
 
     async def _execute_query(
         self,
         connection: AsyncConnection,
-        sql: str
-    ) -> List[Dict[str, Any]]:
+        sql: str,
+        pagination: Optional[Dict[str, int]] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[int]]:
         """
         Execute SQL query and fetch results.
 
         Args:
             connection: Database connection
             sql: SQL query
+            pagination: Optional pagination dict with 'offset' and 'limit'
 
         Returns:
-            List of result rows as dictionaries (or affected row info for write operations)
+            Tuple of (result rows, total count if paginated else None)
         """
         parsed = sqlparse.parse(sql.strip())
 
-        # Compound write + SELECT: execute write first, then return SELECT results
         if len(parsed) == 2:
             stmt1_sql = str(parsed[0]).strip()
             stmt2_sql = str(parsed[1]).strip()
-            if any(stmt1_sql.upper().startswith(op) for op in ('UPDATE', 'INSERT', 'DELETE')):
+            if any(
+                stmt1_sql.upper().startswith(op)
+                for op in ("UPDATE", "INSERT", "DELETE")
+            ):
                 write_result = await connection.execute(text(stmt1_sql))
                 affected = write_result.rowcount
                 logger.info("compound_write_select", affected_rows=affected)
                 select_result = await connection.execute(text(stmt2_sql))
                 rows = select_result.mappings().all()
-                return [
-                    {col: self._serialize_value(val) for col, val in row.items()}
-                    for row in rows
-                ]
+                return (
+                    [
+                        {col: self._serialize_value(val) for col, val in row.items()}
+                        for row in rows
+                    ],
+                    None,
+                )
 
-        # Execute query
         result = await connection.execute(text(sql))
 
-        # Check if this is a write operation (DELETE, UPDATE, INSERT)
         sql_upper = sql.strip().upper()
-        is_write_operation = any(sql_upper.startswith(op) for op in ['DELETE', 'UPDATE', 'INSERT'])
+        is_write_operation = any(
+            sql_upper.startswith(op) for op in ["DELETE", "UPDATE", "INSERT"]
+        )
 
         if is_write_operation:
-            # For write operations, return the affected row count
             affected_rows = result.rowcount
-            return [{
-                "operation": "write",
-                "affected_rows": affected_rows,
-                "message": f"Successfully affected {affected_rows} row(s)"
-            }]
+            return (
+                [
+                    {
+                        "operation": "write",
+                        "affected_rows": affected_rows,
+                        "message": f"Successfully affected {affected_rows} row(s)",
+                    }
+                ],
+                None,
+            )
 
-        # For SELECT queries, fetch all rows as dicts via mappings()
         rows = result.mappings().all()
+        total_rows = len(rows)
 
-        # Convert non-JSON-serializable values (Decimal, datetime, bytes)
+        if pagination and pagination.get("limit"):
+            offset = pagination.get("offset", 0)
+            limit = pagination["limit"]
+            rows = rows[offset : offset + limit]
+            total_rows = len(rows)
+
         results = [
             {col: self._serialize_value(val) for col, val in row.items()}
             for row in rows
         ]
 
-        return results
+        total_count = None
+        if pagination:
+            total_count = (
+                len(rows)
+                if not isinstance(rows, list)
+                else len(result.mappings().all())
+            )
+
+        return results, total_rows
 
     def _serialize_value(self, value: Any) -> Any:
         """
@@ -183,7 +234,7 @@ class QueryExecutor:
         # Handle bytes
         if isinstance(value, bytes):
             try:
-                return value.decode('utf-8')
+                return value.decode("utf-8")
             except UnicodeDecodeError:
                 return str(value)
 

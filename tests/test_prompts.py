@@ -18,6 +18,12 @@ class TestBuildSqlGenerationPrompt:
         prompt = build_sql_generation_prompt("Show all users", sample_schema)
         assert "Show all users" in prompt
 
+    def test_multiline_question_is_not_wrapped_in_inline_backticks(self, sample_schema):
+        question = "Delete these 2 users\n__source_db__  id  name"
+        prompt = build_sql_generation_prompt(question, sample_schema)
+        assert "### User Request" in prompt
+        assert f"`{question}`" not in prompt
+
     def test_contains_schema(self, sample_schema):
         prompt = build_sql_generation_prompt("x", sample_schema)
         assert "CREATE TABLE users" in prompt
@@ -114,6 +120,16 @@ class TestExtractSqlFromResponse:
         resp = "DELETE FROM users WHERE id = 1;"
         result = extract_sql_from_response(resp)
         assert "DELETE" in result
+
+    def test_prose_then_sql_on_same_line(self):
+        resp = "Here is the SQL query: DELETE FROM users WHERE email = 'testing@example.com';"
+        result = extract_sql_from_response(resp)
+        assert result == "DELETE FROM users WHERE email = 'testing@example.com';"
+
+    def test_raw_sql_followed_by_extra_prose(self):
+        resp = "DELETE FROM users WHERE id = 1; This removes the matching row."
+        result = extract_sql_from_response(resp)
+        assert result == "DELETE FROM users WHERE id = 1;"
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     QUERY_TIMEOUT_SECONDS: int = 30
     API_RATE_LIMIT_PER_MINUTE: int = 60
     DB_ENCRYPTION_KEY: str = ""  # Fernet encryption key for database passwords
-    STRICT_SQL_VALIDATION: bool = False  # If True, strict validation. If False, trusts users who know SQL
+    STRICT_SQL_VALIDATION: bool = (
+        False  # If True, strict validation. If False, trusts users who know SQL
+    )
 
     # Database Connection Defaults
     DB_POOL_SIZE: int = 5
@@ -54,11 +56,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
     CORS_ALLOW_CREDENTIALS: bool = True
 
+    # Tunnel Configuration
+    TUNNEL_MAX_MACHINES: int = 10
+    TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: int = 300
+    TUNNEL_QUERY_TIMEOUT_SECONDS: int = 30
+
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore"
     )
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -100,7 +104,9 @@ class Settings(BaseSettings):
         try:
             parsed = urlparse(v)
             if not parsed.scheme:
-                raise ValueError("OLLAMA_BASE_URL must include a scheme (http:// or https://)")
+                raise ValueError(
+                    "OLLAMA_BASE_URL must include a scheme (http:// or https://)"
+                )
             if not parsed.netloc:
                 raise ValueError("OLLAMA_BASE_URL must include a valid host")
             if parsed.scheme not in ["http", "https"]:
@@ -128,9 +134,12 @@ class Settings(BaseSettings):
         # Try to validate it's base64
         try:
             import base64
+
             base64.urlsafe_b64decode(v.encode())
         except Exception:
-            raise ValueError("DB_ENCRYPTION_KEY must be a valid base64-encoded Fernet key")
+            raise ValueError(
+                "DB_ENCRYPTION_KEY must be a valid base64-encoded Fernet key"
+            )
 
         return v
 
@@ -141,7 +150,9 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("API_RATE_LIMIT_PER_MINUTE must be greater than 0")
         if v > 10000:
-            raise ValueError("API_RATE_LIMIT_PER_MINUTE seems unreasonably high (max 10000)")
+            raise ValueError(
+                "API_RATE_LIMIT_PER_MINUTE seems unreasonably high (max 10000)"
+            )
         return v
 
     @field_validator("MAX_QUERY_RESULTS")
@@ -151,7 +162,9 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("MAX_QUERY_RESULTS must be greater than 0")
         if v > 100000:
-            raise ValueError("MAX_QUERY_RESULTS is too high (max 100000 for memory safety)")
+            raise ValueError(
+                "MAX_QUERY_RESULTS is too high (max 100000 for memory safety)"
+            )
         return v
 
 

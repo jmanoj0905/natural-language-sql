@@ -9,13 +9,21 @@ class DatabaseConfig(BaseModel):
 
     database_id: str = Field(..., description="Unique identifier for this database")
     nickname: Optional[str] = Field(None, description="Friendly display name")
-    db_type: str = Field(default="postgresql", description="Database type: postgresql or mysql")
+    db_type: str = Field(
+        default="postgresql", description="Database type: postgresql or mysql"
+    )
     host: str = Field(..., description="Database host")
     port: int = Field(..., ge=1, le=65535, description="Database port")
     database: str = Field(..., description="Database name")
     username: str = Field(..., description="Database username")
     password: str = Field(..., description="Database password")
     ssl_mode: str = Field(default="prefer", description="SSL mode (for PostgreSQL)")
+    is_tunnel: bool = Field(
+        default=False, description="Whether this database is accessed via tunnel"
+    )
+    machine_id: Optional[str] = Field(
+        None, description="Machine ID for tunnel connections"
+    )
 
     class Config:
         json_schema_extra = {
@@ -27,7 +35,7 @@ class DatabaseConfig(BaseModel):
                 "database": "myapp",
                 "username": "readonly_user",
                 "password": "secure_password",
-                "ssl_mode": "prefer"
+                "ssl_mode": "prefer",
             }
         }
 
@@ -53,6 +61,9 @@ class DatabaseInfo(BaseModel):
     is_connected: bool
     table_count: Optional[int] = None
     ssl_mode: str
+    is_tunnel: bool = False
+    machine_id: Optional[str] = None
+    connection_type: str = "direct"  # "direct" or "tunnel"
 
 
 class DatabaseListResponse(BaseModel):

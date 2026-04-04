@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlsql-connector"
+version = "0.1.0"
+description = "Connect local databases to NLSQL cloud backend"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "NLSQL", email = "info@nlsql.io"}
+]
+requires-python = ">=3.9"
+dependencies = [
+    "websockets>=12.0",
+    "asyncpg>=0.30.0",
+    "aiomysql>=0.2.0",
+    "click>=8.0.0",
+]
+
+[project.scripts]
+nlsql-connector = "nlsql_connector.tunnel:main"
+
+[project.urls]
+Homepage = "https://github.com/jmanoj0905/natural-language-sql"
+Repository = "https://github.com/jmanoj0905/natural-language-sql"
+
+[tool.setuptools]
+packages = ["nlsql_connector"]

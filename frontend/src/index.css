@@ -90,6 +90,53 @@
   vertical-align: middle;
 }
 
+/* Neobrutalist Custom Cursor */
+.cursor-dot {
+  width: 8px;
+  height: 8px;
+  background: #1a1c1d;
+  border-radius: 0;
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  transition: transform 0.05s ease-out, width 0.1s, height 0.1s;
+}
+
+.cursor-outline {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #1a1c1d;
+  background: rgba(233, 213, 255, 0.3);
+  border-radius: 0;
+  position: fixed;
+  pointer-events: none;
+  z-index: 9998;
+  transform: translate(-50%, -50%);
+  transition: transform 0.15s ease-out, width 0.15s, height 0.15s, background 0.15s;
+}
+
+.cursor-dot.hovering,
+.cursor-outline.hovering {
+  transform: translate(-50%, -50%) scale(0.5);
+}
+
+.cursor-outline.hovering {
+  width: 48px;
+  height: 48px;
+  background: rgba(233, 213, 255, 0.6);
+  border-color: #E9D5FF;
+}
+
+/* Hide default cursor when custom cursor is active */
+body.cursor-active {
+  cursor: none;
+}
+
+body.cursor-active * {
+  cursor: none;
+}
+
 /* Neobrutalist utilities */
 .soft-shadow { box-shadow: 4px 4px 0px 0px #1a1c1d; }
 .soft-shadow-lg { box-shadow: 6px 6px 0px 0px #1a1c1d; }

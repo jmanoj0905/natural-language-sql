@@ -20,5 +20,15 @@ export default defineConfig({
         ws: true,
       }
     }
+  },
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'https://natural-language-sql-ue9l.onrender.com',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      }
+    }
   }
 })

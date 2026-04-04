@@ -274,10 +274,12 @@ export default function ResultsDisplay({ result }) {
 
           {/* Warnings */}
           {result.warnings?.length > 0 && (
-            <div className="px-5 py-3 border-t-2 border-border bg-warning/20 space-y-1">
-              <span className="text-xs font-heading uppercase">Partial results — some databases failed:</span>
+            <div className="px-5 py-3 border-t-2 border-border bg-warning/20 space-y-2">
+              <span className="text-xs font-heading uppercase">Some databases could not complete this request:</span>
               {result.warnings.map((w, i) => (
-                <p key={i} className="text-xs text-foreground/70 font-mono">{w}</p>
+                <p key={i} className="text-sm text-foreground/80 leading-relaxed">
+                  {w}
+                </p>
               ))}
             </div>
           )}

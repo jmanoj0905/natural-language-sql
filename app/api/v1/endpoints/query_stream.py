@@ -14,7 +14,10 @@ from app.models.query import (
     QueryResponse,
     ExecutionResult,
 )
-from app.core.database.connection_manager import get_db_manager, DatabaseConnectionManager
+from app.core.database.connection_manager import (
+    get_db_manager,
+    DatabaseConnectionManager,
+)
 from app.core.ai.ollama_client import get_ollama_client
 from app.core.ai.prompts import (
     build_sql_generation_prompt,
@@ -22,6 +25,7 @@ from app.core.ai.prompts import (
     extract_explanation_from_response,
     build_explanation,
 )
+from app.core.ai.query_planner import get_intent_detector
 from app.core.database.schema_inspector import SchemaInspector
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
@@ -58,7 +62,9 @@ def _parse_db_ids(
 async def natural_language_query_stream(
     request: NaturalLanguageQueryRequest,
     database_id: Optional[str] = Query(None, description="Database ID to query"),
-    database_ids: Optional[str] = Query(None, description="Comma-separated database IDs for multi-DB fan-out"),
+    database_ids: Optional[str] = Query(
+        None, description="Comma-separated database IDs for multi-DB fan-out"
+    ),
     db_manager: DatabaseConnectionManager = Depends(get_db_manager),
     validator: QueryValidator = Depends(get_query_validator),
     executor: QueryExecutor = Depends(get_query_executor),
@@ -77,49 +83,70 @@ async def natural_language_query_stream(
 
     # --- Pre-stream validation ---
     if not db_manager.is_configured:
+
         async def error_stream():
-            yield sse_event("error", {
-                "stage": "connect",
-                "error": "No database configured. Please add a database connection first.",
-                "code": "DATABASE_NOT_CONFIGURED",
-            })
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": "No database configured. Please add a database connection first.",
+                    "code": "DATABASE_NOT_CONFIGURED",
+                },
+            )
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     if not ids:
+
         async def error_stream():
-            yield sse_event("error", {
-                "stage": "connect",
-                "error": "No database specified and no default database is set",
-                "code": "NO_DATABASE_SPECIFIED",
-            })
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": "No database specified and no default database is set",
+                    "code": "NO_DATABASE_SPECIFIED",
+                },
+            )
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     known_ids = set(db_manager.list_databases())
     missing = [i for i in ids if i not in known_ids]
     if missing:
+
         async def error_stream():
-            yield sse_event("error", {
-                "stage": "connect",
-                "error": f"Database(s) not found: {', '.join(missing)}",
-                "code": "DATABASE_NOT_FOUND",
-            })
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": f"Database(s) not found: {', '.join(missing)}",
+                    "code": "DATABASE_NOT_FOUND",
+                },
+            )
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     # All selected DBs must share the same db_type
     db_types = {db_manager.get_database_config(i).db_type for i in ids}
     if len(db_types) > 1:
+
         async def error_stream():
-            yield sse_event("error", {
-                "stage": "connect",
-                "error": "Cannot fan out across mixed database types. All selected databases must be the same type.",
-                "code": "MIXED_DB_TYPES",
-            })
+            yield sse_event(
+                "error",
+                {
+                    "stage": "connect",
+                    "error": "Cannot fan out across mixed database types. All selected databases must be the same type.",
+                    "code": "MIXED_DB_TYPES",
+                },
+            )
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     multi_db = len(ids) > 1
 
     # ---- Single-DB fast path ----
     if not multi_db:
+
         async def single_db_generator():
             target_db_id = ids[0]
             try:
@@ -128,28 +155,38 @@ async def natural_language_query_stream(
                 ai_client = get_ollama_client()
 
                 # --- Stage 1: Connect ---
-                yield sse_event("progress", {"stage": "connect", "status": "in_progress"})
+                yield sse_event(
+                    "progress", {"stage": "connect", "status": "in_progress"}
+                )
                 t0 = time.perf_counter()
                 try:
                     conn_cm = db_manager.get_connection(target_db_id)
                     conn = await conn_cm.__aenter__()
                 except Exception as e:
-                    yield sse_event("error", {
-                        "stage": "connect",
-                        "error": str(e),
-                        "code": "DATABASE_CONNECTION_ERROR",
-                    })
+                    yield sse_event(
+                        "error",
+                        {
+                            "stage": "connect",
+                            "error": str(e),
+                            "code": "DATABASE_CONNECTION_ERROR",
+                        },
+                    )
                     return
                 elapsed = round((time.perf_counter() - t0) * 1000)
-                yield sse_event("progress", {
-                    "stage": "connect",
-                    "status": "completed",
-                    "duration_ms": elapsed,
-                })
+                yield sse_event(
+                    "progress",
+                    {
+                        "stage": "connect",
+                        "status": "completed",
+                        "duration_ms": elapsed,
+                    },
+                )
 
                 try:
                     # --- Stage 2: Schema ---
-                    yield sse_event("progress", {"stage": "schema", "status": "in_progress"})
+                    yield sse_event(
+                        "progress", {"stage": "schema", "status": "in_progress"}
+                    )
                     t0 = time.perf_counter()
                     schema_context = await schema_inspector.get_schema_summary(
                         conn,
@@ -160,31 +197,54 @@ async def natural_language_query_stream(
                     )
                     elapsed = round((time.perf_counter() - t0) * 1000)
                     table_count = schema_context.count("CREATE TABLE")
-                    schema_msg = f"Loaded {table_count} table{'s' if table_count != 1 else ''}"
+                    schema_msg = (
+                        f"Loaded {table_count} table{'s' if table_count != 1 else ''}"
+                    )
                     if table_count >= 50:
                         schema_msg += " (truncated — showing first 50)"
-                    yield sse_event("progress", {
-                        "stage": "schema",
-                        "status": "completed",
-                        "duration_ms": elapsed,
-                        "message": schema_msg,
-                    })
+                    yield sse_event(
+                        "progress",
+                        {
+                            "stage": "schema",
+                            "status": "completed",
+                            "duration_ms": elapsed,
+                            "message": schema_msg,
+                        },
+                    )
 
                     # --- Stage 3: AI Generate ---
-                    yield sse_event("progress", {
-                        "stage": "ai",
-                        "status": "in_progress",
-                        "message": "Waiting for Ollama...",
-                    })
+                    yield sse_event(
+                        "progress",
+                        {
+                            "stage": "ai",
+                            "status": "in_progress",
+                            "message": "Waiting for Ollama...",
+                        },
+                    )
                     t0 = time.perf_counter()
 
                     raw_db_type = (db_config.db_type or "postgresql").lower()
                     database_type = "MySQL" if raw_db_type == "mysql" else "PostgreSQL"
+
+                    # Detect query intent for context-aware prompts
+                    intent_detector = get_intent_detector()
+                    registered_dbs = db_manager.list_databases()
+                    query_plan = intent_detector.detect_intent(
+                        question=request.question, registered_dbs=registered_dbs
+                    )
+
+                    intent_context = {
+                        "intent": query_plan.intent.value,
+                        "database_refs": query_plan.database_refs,
+                        "needs_decomposition": query_plan.needs_decomposition,
+                    }
+
                     prompt = build_sql_generation_prompt(
                         question=request.question,
                         schema_context=schema_context,
                         database_type=database_type,
                         read_only=request.options.read_only,
+                        intent_context=intent_context,
                     )
                     response_text = await ai_client.generate_content(prompt)
                     logger.debug("ollama_raw_response", response=response_text)
@@ -195,38 +255,51 @@ async def natural_language_query_stream(
 
                     if not sql:
                         logger.error("sql_extraction_failed", response=response_text)
-                        yield sse_event("error", {
-                            "stage": "ai",
-                            "error": "Failed to extract SQL from AI response",
-                            "raw_response": response_text[:500],
-                            "code": "AI_PARSE_ERROR",
-                        })
+                        yield sse_event(
+                            "error",
+                            {
+                                "stage": "ai",
+                                "error": "Failed to extract SQL from AI response",
+                                "raw_response": response_text[:500],
+                                "code": "AI_PARSE_ERROR",
+                            },
+                        )
                         return
 
                     elapsed = round((time.perf_counter() - t0) * 1000)
-                    yield sse_event("progress", {
-                        "stage": "ai",
-                        "status": "completed",
-                        "duration_ms": elapsed,
-                    })
+                    yield sse_event(
+                        "progress",
+                        {
+                            "stage": "ai",
+                            "status": "completed",
+                            "duration_ms": elapsed,
+                        },
+                    )
 
                     # --- Stage 4: Validate ---
-                    yield sse_event("progress", {"stage": "validate", "status": "in_progress"})
+                    yield sse_event(
+                        "progress", {"stage": "validate", "status": "in_progress"}
+                    )
                     t0 = time.perf_counter()
                     validated_sql = validator.validate(sql)
                     elapsed = round((time.perf_counter() - t0) * 1000)
-                    yield sse_event("progress", {
-                        "stage": "validate",
-                        "status": "completed",
-                        "duration_ms": elapsed,
-                    })
+                    yield sse_event(
+                        "progress",
+                        {
+                            "stage": "validate",
+                            "status": "completed",
+                            "duration_ms": elapsed,
+                        },
+                    )
 
                     # --- Stage 5: Execute ---
                     execution_result = None
                     if request.options.execute:
-                        yield sse_event("progress", {"stage": "execute", "status": "in_progress"})
+                        yield sse_event(
+                            "progress", {"stage": "execute", "status": "in_progress"}
+                        )
                         t0 = time.perf_counter()
-                        results, exec_time = await executor.execute(
+                        results, exec_time, _ = await executor.execute(
                             connection=conn, sql=validated_sql
                         )
                         columns = list(results[0].keys()) if results else []
@@ -237,13 +310,18 @@ async def natural_language_query_stream(
                             columns=columns,
                         )
                         elapsed = round((time.perf_counter() - t0) * 1000)
-                        yield sse_event("progress", {
-                            "stage": "execute",
-                            "status": "completed",
-                            "duration_ms": elapsed,
-                        })
+                        yield sse_event(
+                            "progress",
+                            {
+                                "stage": "execute",
+                                "status": "completed",
+                                "duration_ms": elapsed,
+                            },
+                        )
                     else:
-                        yield sse_event("progress", {"stage": "execute", "status": "skipped"})
+                        yield sse_event(
+                            "progress", {"stage": "execute", "status": "skipped"}
+                        )
 
                     # --- Final result ---
                     query_response = QueryResponse(
@@ -267,18 +345,28 @@ async def natural_language_query_stream(
 
             except NLSQLException as e:
                 logger.error("stream_query_failed", error=str(e), error_code=e.code)
-                yield sse_event("error", {
-                    "stage": "unknown",
-                    "error": e.message,
-                    "code": e.code,
-                })
+                yield sse_event(
+                    "error",
+                    {
+                        "stage": "unknown",
+                        "error": e.message,
+                        "code": e.code,
+                    },
+                )
             except Exception as e:
-                logger.error("stream_query_unexpected_error", error=str(e), error_type=type(e).__name__)
-                yield sse_event("error", {
-                    "stage": "unknown",
-                    "error": str(e),
-                    "code": "INTERNAL_ERROR",
-                })
+                logger.error(
+                    "stream_query_unexpected_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                yield sse_event(
+                    "error",
+                    {
+                        "stage": "unknown",
+                        "error": str(e),
+                        "code": "INTERNAL_ERROR",
+                    },
+                )
 
         return StreamingResponse(
             single_db_generator(),
@@ -300,11 +388,14 @@ async def natural_language_query_stream(
 
         try:
             # --- Stage 1: Connect to all databases ---
-            yield sse_event("progress", {
-                "stage": "connect",
-                "status": "in_progress",
-                "message": f"Connecting to {len(ids)} databases...",
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "connect",
+                    "status": "in_progress",
+                    "message": f"Connecting to {len(ids)} databases...",
+                },
+            )
             t0 = time.perf_counter()
 
             for db_id in ids:
@@ -320,20 +411,26 @@ async def natural_language_query_stream(
                             await cm.__aexit__(None, None, None)
                         except Exception:
                             pass
-                    yield sse_event("error", {
-                        "stage": "connect",
-                        "error": f"Failed to connect to '{nicknames[db_id]}': {e}",
-                        "code": "DATABASE_CONNECTION_ERROR",
-                    })
+                    yield sse_event(
+                        "error",
+                        {
+                            "stage": "connect",
+                            "error": f"Failed to connect to '{nicknames[db_id]}': {e}",
+                            "code": "DATABASE_CONNECTION_ERROR",
+                        },
+                    )
                     return
 
             elapsed = round((time.perf_counter() - t0) * 1000)
-            yield sse_event("progress", {
-                "stage": "connect",
-                "status": "completed",
-                "duration_ms": elapsed,
-                "message": f"Connected to {len(ids)} databases",
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "connect",
+                    "status": "completed",
+                    "duration_ms": elapsed,
+                    "message": f"Connected to {len(ids)} databases",
+                },
+            )
 
             # --- Stage 2: Schema from first database ---
             primary_id = ids[0]
@@ -354,28 +451,49 @@ async def natural_language_query_stream(
             schema_msg = f"Loaded {table_count} table{'s' if table_count != 1 else ''} from {nicknames[primary_id]}"
             if table_count >= 50:
                 schema_msg += " (truncated — showing first 50)"
-            yield sse_event("progress", {
-                "stage": "schema",
-                "status": "completed",
-                "duration_ms": elapsed,
-                "message": schema_msg,
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "schema",
+                    "status": "completed",
+                    "duration_ms": elapsed,
+                    "message": schema_msg,
+                },
+            )
 
             # --- Stage 3: AI Generate (once) ---
-            yield sse_event("progress", {
-                "stage": "ai",
-                "status": "in_progress",
-                "message": "Waiting for Ollama...",
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "ai",
+                    "status": "in_progress",
+                    "message": "Waiting for Ollama...",
+                },
+            )
             t0 = time.perf_counter()
 
             raw_db_type = (primary_config.db_type or "postgresql").lower()
             database_type = "MySQL" if raw_db_type == "mysql" else "PostgreSQL"
+
+            # Detect query intent for context-aware prompts
+            intent_detector = get_intent_detector()
+            registered_dbs = db_manager.list_databases()
+            query_plan = intent_detector.detect_intent(
+                question=request.question, registered_dbs=registered_dbs
+            )
+
+            intent_context = {
+                "intent": query_plan.intent.value,
+                "database_refs": query_plan.database_refs,
+                "needs_decomposition": query_plan.needs_decomposition,
+            }
+
             prompt = build_sql_generation_prompt(
                 question=request.question,
                 schema_context=schema_context,
                 database_type=database_type,
                 read_only=request.options.read_only,
+                intent_context=intent_context,
             )
             response_text = await ai_client.generate_content(prompt)
             logger.debug("ollama_raw_response", response=response_text)
@@ -386,41 +504,53 @@ async def natural_language_query_stream(
 
             if not sql:
                 logger.error("sql_extraction_failed", response=response_text)
-                yield sse_event("error", {
-                    "stage": "ai",
-                    "error": "Failed to extract SQL from AI response",
-                    "raw_response": response_text[:500],
-                    "code": "AI_PARSE_ERROR",
-                })
+                yield sse_event(
+                    "error",
+                    {
+                        "stage": "ai",
+                        "error": "Failed to extract SQL from AI response",
+                        "raw_response": response_text[:500],
+                        "code": "AI_PARSE_ERROR",
+                    },
+                )
                 return
 
             elapsed = round((time.perf_counter() - t0) * 1000)
-            yield sse_event("progress", {
-                "stage": "ai",
-                "status": "completed",
-                "duration_ms": elapsed,
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "ai",
+                    "status": "completed",
+                    "duration_ms": elapsed,
+                },
+            )
 
             # --- Stage 4: Validate (once) ---
             yield sse_event("progress", {"stage": "validate", "status": "in_progress"})
             t0 = time.perf_counter()
             validated_sql = validator.validate(sql)
             elapsed = round((time.perf_counter() - t0) * 1000)
-            yield sse_event("progress", {
-                "stage": "validate",
-                "status": "completed",
-                "duration_ms": elapsed,
-            })
+            yield sse_event(
+                "progress",
+                {
+                    "stage": "validate",
+                    "status": "completed",
+                    "duration_ms": elapsed,
+                },
+            )
 
             # --- Stage 5: Execute across all databases in parallel ---
             execution_result = None
             warnings = []
             if request.options.execute:
-                yield sse_event("progress", {
-                    "stage": "execute",
-                    "status": "in_progress",
-                    "message": f"Executing on {len(ids)} databases...",
-                })
+                yield sse_event(
+                    "progress",
+                    {
+                        "stage": "execute",
+                        "status": "in_progress",
+                        "message": f"Executing on {len(ids)} databases...",
+                    },
+                )
                 t0 = time.perf_counter()
 
                 async def _run_on(db_id):
@@ -437,25 +567,32 @@ async def natural_language_query_stream(
                 original_columns = []
 
                 for db_id, result in zip(ids, gather_results):
-                    if isinstance(result, Exception):
+                    if isinstance(result, BaseException):
                         warnings.append(f"{nicknames[db_id]}: {result}")
-                        logger.warning("multi_db_exec_failed", db_id=db_id, error=str(result))
+                        logger.warning(
+                            "multi_db_exec_failed", db_id=db_id, error=str(result)
+                        )
                     else:
-                        rows, exec_time = result
+                        rows, exec_time, _ = result
                         total_exec_time = max(total_exec_time, exec_time)
                         if rows and not original_columns:
                             original_columns = list(rows[0].keys())
                         for row in rows:
-                            merged_rows.append({"__source_db__": nicknames[db_id], **row})
+                            merged_rows.append(
+                                {"__source_db__": nicknames[db_id], **row}
+                            )
 
                 if not merged_rows and warnings:
                     # All executions failed
-                    yield sse_event("error", {
-                        "stage": "execute",
-                        "error": "All database executions failed",
-                        "details": [str(w) for w in warnings],
-                        "code": "MULTI_DB_ALL_FAILED",
-                    })
+                    yield sse_event(
+                        "error",
+                        {
+                            "stage": "execute",
+                            "error": "All database executions failed",
+                            "details": [str(w) for w in warnings],
+                            "code": "MULTI_DB_ALL_FAILED",
+                        },
+                    )
                     return
 
                 columns = (["__source_db__"] + original_columns) if merged_rows else []
@@ -467,12 +604,15 @@ async def natural_language_query_stream(
                 )
 
                 elapsed = round((time.perf_counter() - t0) * 1000)
-                yield sse_event("progress", {
-                    "stage": "execute",
-                    "status": "completed",
-                    "duration_ms": elapsed,
-                    "message": f"Executed on {len(ids) - len(warnings)}/{len(ids)} databases",
-                })
+                yield sse_event(
+                    "progress",
+                    {
+                        "stage": "execute",
+                        "status": "completed",
+                        "duration_ms": elapsed,
+                        "message": f"Executed on {len(ids) - len(warnings)}/{len(ids)} databases",
+                    },
+                )
             else:
                 yield sse_event("progress", {"stage": "execute", "status": "skipped"})
 
@@ -497,18 +637,28 @@ async def natural_language_query_stream(
 
         except NLSQLException as e:
             logger.error("stream_multi_query_failed", error=str(e), error_code=e.code)
-            yield sse_event("error", {
-                "stage": "unknown",
-                "error": e.message,
-                "code": e.code,
-            })
+            yield sse_event(
+                "error",
+                {
+                    "stage": "unknown",
+                    "error": e.message,
+                    "code": e.code,
+                },
+            )
         except Exception as e:
-            logger.error("stream_multi_query_unexpected_error", error=str(e), error_type=type(e).__name__)
-            yield sse_event("error", {
-                "stage": "unknown",
-                "error": str(e),
-                "code": "INTERNAL_ERROR",
-            })
+            logger.error(
+                "stream_multi_query_unexpected_error",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            yield sse_event(
+                "error",
+                {
+                    "stage": "unknown",
+                    "error": str(e),
+                    "code": "INTERNAL_ERROR",
+                },
+            )
         finally:
             # Close all open connections
             for db_id, (cm, _) in open_connections.items():

@@ -1,11 +1,16 @@
 """Ollama local AI client for SQL generation - FREE and no API keys!"""
 
+import asyncio
 import httpx
 from app.config import get_settings
 from app.exceptions import AIAPIError
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 1.0
+RETRY_BACKOFF_FACTOR = 2.0
 
 
 class OllamaClient:
@@ -32,15 +37,40 @@ class OllamaClient:
             logger.info(
                 "ollama_client_initialized",
                 model=self.settings.OLLAMA_MODEL,
-                base_url=self.base_url
+                base_url=self.base_url,
             )
         except Exception as e:
             logger.error("ollama_initialization_failed", error=str(e))
             raise AIAPIError(f"Failed to initialize Ollama client: {str(e)}")
 
+    async def _retry_with_backoff(self, func, *args, **kwargs):
+        """Execute a function with exponential backoff retry logic."""
+        last_exception = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return await func(*args, **kwargs)
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.TimeoutException) as e:
+                last_exception = e
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY_BASE * (RETRY_BACKOFF_FACTOR**attempt)
+                    logger.warning(
+                        "ollama_retry_attempt",
+                        attempt=attempt + 1,
+                        max_retries=MAX_RETRIES,
+                        delay_seconds=delay,
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("ollama_all_retries_failed", error=str(last_exception))
+            except Exception:
+                raise
+        if last_exception:
+            raise last_exception
+
     async def generate_content(self, prompt: str) -> str:
         """
-        Generate content using Ollama API.
+        Generate content using Ollama API with retry logic.
 
         Args:
             prompt: Input prompt
@@ -49,9 +79,10 @@ class OllamaClient:
             str: Generated content
 
         Raises:
-            AIAPIError: If API call fails
+            AIAPIError: If API call fails after all retries
         """
-        try:
+
+        async def _make_request():
             async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/generate",
@@ -62,8 +93,8 @@ class OllamaClient:
                         "options": {
                             "temperature": self.settings.OLLAMA_TEMPERATURE,
                             "stop": ["```"],
-                        }
-                    }
+                        },
+                    },
                 )
 
                 if response.status_code != 200:
@@ -80,13 +111,22 @@ class OllamaClient:
                 logger.debug(
                     "ollama_content_generated",
                     prompt_length=len(prompt),
-                    response_length=len(content)
+                    response_length=len(content),
                 )
 
                 return content
 
+        try:
+            result = await self._retry_with_backoff(_make_request)
+            if result is None:
+                raise AIAPIError("Failed to generate content after retries")
+            return result
+
         except httpx.ConnectError:
-            logger.error("ollama_connection_failed", error="Cannot connect to Ollama. Is it running?")
+            logger.error(
+                "ollama_connection_failed",
+                error="Cannot connect to Ollama. Is it running?",
+            )
             raise AIAPIError(
                 "Cannot connect to Ollama. Make sure Ollama is running: 'ollama serve'"
             )
@@ -95,19 +135,68 @@ class OllamaClient:
             raise AIAPIError(
                 "Ollama took too long to respond (>300s). The model may be overloaded or the prompt too large."
             )
+        except AIAPIError:
+            raise
         except Exception as e:
             error_msg = str(e) or type(e).__name__
             logger.error(
                 "ollama_content_generation_failed",
                 error=error_msg,
                 error_type=type(e).__name__,
-                prompt=prompt[:200]
+                prompt=prompt[:200],
             )
             raise AIAPIError(f"Failed to generate content: {error_msg}")
 
+    async def check_health(self) -> dict:
+        """
+        Check if Ollama is accessible and healthy.
+
+        Returns:
+            dict: Health status with model availability
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/tags")
+
+                if response.status_code != 200:
+                    return {
+                        "status": "unhealthy",
+                        "error": f"HTTP {response.status_code}",
+                        "models": [],
+                    }
+
+                data = response.json()
+                models = data.get("models", [])
+                model_names = [m.get("name", "") for m in models]
+
+                configured_model = self.settings.OLLAMA_MODEL
+                is_configured_model_available = any(
+                    configured_model in name
+                    or configured_model.split(":")[0] in name.split(":")[0]
+                    for name in model_names
+                )
+
+                return {
+                    "status": "healthy"
+                    if is_configured_model_available
+                    else "degraded",
+                    "models": model_names,
+                    "configured_model": configured_model,
+                    "model_available": is_configured_model_available,
+                }
+
+        except httpx.ConnectError:
+            return {
+                "status": "unhealthy",
+                "error": "Cannot connect to Ollama",
+                "models": [],
+            }
+        except Exception as e:
+            return {"status": "unhealthy", "error": str(e), "models": []}
+
 
 # Global client instance
-_ollama_client: OllamaClient = None
+_ollama_client: OllamaClient | None = None
 
 
 def get_ollama_client() -> OllamaClient:

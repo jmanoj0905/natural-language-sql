@@ -1,8 +1,9 @@
 """FastAPI application entry point."""
 
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -12,9 +13,30 @@ from app.models.database import DatabaseConfig
 from app.exceptions import NLSQLException
 from app.utils.logger import get_logger, configure_logging
 
-# Configure logging
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_metrics")
+
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
 configure_logging()
 logger = get_logger(__name__)
+
+query_requests_total = Counter(
+    "query_requests_total", "Total query requests", ["endpoint", "status"]
+)
+
+query_duration_seconds = Histogram(
+    "query_duration_seconds", "Query request duration in seconds", ["endpoint"]
+)
+
+ai_generation_duration_seconds = Histogram(
+    "ai_generation_duration_seconds", "AI generation duration in seconds", ["model"]
+)
+
+database_connections_total = Counter(
+    "database_connections_total",
+    "Total database connections",
+    ["database_id", "status"],
+)
 
 
 @asynccontextmanager
@@ -25,8 +47,8 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup
-    # Load environment variables from .env file
     from dotenv import load_dotenv
+
     load_dotenv()
 
     settings = get_settings()
@@ -36,12 +58,13 @@ async def lifespan(app: FastAPI):
         environment=settings.ENVIRONMENT,
         debug=settings.DEBUG,
         ollama_url=settings.OLLAMA_BASE_URL,
-        ollama_model=settings.OLLAMA_MODEL
+        ollama_model=settings.OLLAMA_MODEL,
     )
 
     # Verify Ollama is reachable
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
             if response.status_code == 200:
@@ -50,24 +73,26 @@ async def lifespan(app: FastAPI):
                 logger.info(
                     "ollama_connection_verified",
                     available_models=model_names,
-                    configured_model=settings.OLLAMA_MODEL
+                    configured_model=settings.OLLAMA_MODEL,
                 )
 
-                # Check if configured model is available (strip :latest tag for comparison)
                 normalized_names = [n.split(":")[0] for n in model_names]
-                if settings.OLLAMA_MODEL not in model_names and settings.OLLAMA_MODEL not in normalized_names:
+                if (
+                    settings.OLLAMA_MODEL not in model_names
+                    and settings.OLLAMA_MODEL not in normalized_names
+                ):
                     logger.warning(
                         "configured_model_not_found",
                         configured_model=settings.OLLAMA_MODEL,
                         available_models=model_names,
                         message=f"Configured model '{settings.OLLAMA_MODEL}' not found. "
-                        f"Pull it with: docker exec -it nlsql-ollama ollama pull {settings.OLLAMA_MODEL}"
+                        f"Pull it with: docker exec -it nlsql-ollama ollama pull {settings.OLLAMA_MODEL}",
                     )
             else:
                 logger.warning(
                     "ollama_connection_issue",
                     status_code=response.status_code,
-                    message="Ollama API responded with non-200 status"
+                    message="Ollama API responded with non-200 status",
                 )
     except Exception as e:
         logger.warning(
@@ -75,30 +100,29 @@ async def lifespan(app: FastAPI):
             error=str(e),
             url=settings.OLLAMA_BASE_URL,
             message=f"Cannot connect to Ollama at {settings.OLLAMA_BASE_URL}. "
-            "Make sure Ollama is running. The API will not work without Ollama."
+            "Make sure Ollama is running. The API will not work without Ollama.",
         )
 
-    # For MVP: Configure database from environment variables
-    # In production, this could be done via API endpoint or config file
     try:
-        # Check if database configuration is available in environment
-        import os
-        if all([
-            os.getenv("DB_HOST"),
-            os.getenv("DB_PORT"),
-            os.getenv("DB_NAME"),
-            os.getenv("DB_USER"),
-            os.getenv("DB_PASSWORD")
-        ]):
+        if all(
+            [
+                os.getenv("DB_HOST"),
+                os.getenv("DB_PORT"),
+                os.getenv("DB_NAME"),
+                os.getenv("DB_USER"),
+                os.getenv("DB_PASSWORD"),
+            ]
+        ):
             db_config = DatabaseConfig(
-                database_id=os.getenv("DB_ID", "default"),
-                host=os.getenv("DB_HOST"),
-                port=int(os.getenv("DB_PORT")),
-                database=os.getenv("DB_NAME"),
-                username=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                ssl_mode=os.getenv("DB_SSL_MODE", "prefer"),
-                db_type=os.getenv("DB_TYPE", "postgresql")
+                database_id=os.getenv("DB_ID") or "default",
+                nickname=os.getenv("DB_NICKNAME"),
+                host=os.getenv("DB_HOST") or "",
+                port=int(os.getenv("DB_PORT") or "5432"),
+                database=os.getenv("DB_NAME") or "",
+                username=os.getenv("DB_USER") or "",
+                password=os.getenv("DB_PASSWORD") or "",
+                ssl_mode=os.getenv("DB_SSL_MODE") or "prefer",
+                db_type=os.getenv("DB_TYPE") or "postgresql",
             )
 
             db_manager = get_db_manager()
@@ -107,13 +131,10 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(
                 "database_not_configured",
-                message="Database environment variables not set. Configure via API or environment."
+                message="Database environment variables not set. Configure via API or environment.",
             )
     except Exception as e:
-        logger.error(
-            "database_configuration_failed_at_startup",
-            error=str(e)
-        )
+        logger.error("database_configuration_failed_at_startup", error=str(e))
 
     yield
 
@@ -145,7 +166,6 @@ app.add_middleware(
 )
 
 
-
 # Global exception handler for NLSQLException
 @app.exception_handler(NLSQLException)
 async def nlsql_exception_handler(request: Request, exc: NLSQLException):
@@ -156,7 +176,7 @@ async def nlsql_exception_handler(request: Request, exc: NLSQLException):
         "nlsql_exception_caught",
         error_code=exc.code,
         error_message=exc.message,
-        path=request.url.path
+        path=request.url.path,
     )
 
     return JSONResponse(
@@ -167,14 +187,26 @@ async def nlsql_exception_handler(request: Request, exc: NLSQLException):
                 "code": exc.code,
                 "message": exc.message,
                 "details": exc.details,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
+                "timestamp": datetime.now().isoformat(),
+            },
+        },
     )
 
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
+
+# WebSocket endpoint for tunnel (outside /api prefix)
+from app.api.v1.endpoints.tunnel import websocket_tunnel
+
+app.add_api_websocket_route("/ws/tunnel", websocket_tunnel)
+
+
+# Prometheus metrics endpoint
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return PlainTextResponse(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # Root endpoint
@@ -186,7 +218,7 @@ async def root():
         "version": settings.API_VERSION,
         "status": "running",
         "docs": "/docs",
-        "health": "/api/v1/health"
+        "health": "/api/v1/health",
     }
 
 
@@ -198,5 +230,5 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.RELOAD or settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
     )

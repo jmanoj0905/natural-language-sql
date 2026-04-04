@@ -3,7 +3,9 @@ import axios from 'axios'
 import { useToast } from '../hooks/useToast.jsx'
 import DbIcon from './DbIcon'
 import QueryProgress from './QueryProgress'
+import MultiStepPlan from './MultiStepPlan'
 import { detectWriteOp } from '../utils/sql'
+import { extractApiErrorMessage } from '../utils/queryErrors'
 
 const INITIAL_STAGES = [
   { id: 'connect', status: 'pending' },
@@ -58,6 +60,8 @@ export default function QueryInterface({
   const [progressError, setProgressError] = useState(null)
   const [pendingResult, setPendingResult] = useState(null)
   const [editedSql, setEditedSql] = useState('')
+  const [showMultiStepPlan, setShowMultiStepPlan] = useState(false)
+  const [multiStepQuestion, setMultiStepQuestion] = useState('')
   const abortRef = useRef(null)
   const aiTimeoutRef = useRef(null)
 
@@ -148,7 +152,7 @@ export default function QueryInterface({
               clearTimeout(aiTimeoutRef.current)
             }
           } else if (evt.event === 'error') {
-            const msg = evt.data.error || 'An error occurred'
+            const msg = extractApiErrorMessage(evt.data?.error, 'An error occurred')
             setError(msg)
             setProgressError(msg)
             showError(msg)
@@ -164,7 +168,7 @@ export default function QueryInterface({
       }
     } catch (err) {
       if (err.name === 'AbortError') return
-      const msg = err.message || 'Connection failed'
+      const msg = extractApiErrorMessage(err, 'Connection failed')
       setError(msg)
       setProgressError(msg)
       showError(msg)
@@ -212,7 +216,7 @@ export default function QueryInterface({
               mergedRows.push({ __source_db__: nicknames[dbId], ...row })
             }
           } else {
-            warnings.push(`${nicknames[dbId]}: ${settled[i].reason?.message || 'failed'}`)
+            warnings.push(`${nicknames[dbId]}: ${extractApiErrorMessage(settled[i].reason, 'Request failed')}`)
           }
         }
         onResult({
@@ -226,11 +230,15 @@ export default function QueryInterface({
             columns: mergedRows.length ? ['__source_db__', ...origCols] : [],
           },
           warnings,
-          metadata: { database_ids: selectedDbIds, multi_db: true },
+          metadata: {
+            database_ids: selectedDbIds,
+            database_nicknames: selectedDbIds.map(dbId => nicknames[dbId]),
+            multi_db: true,
+          },
         })
       }
     } catch (err) {
-      const msg = err.response?.data?.detail?.message || err.response?.data?.detail || err.message
+      const msg = extractApiErrorMessage(err, 'Query failed')
       setError(msg)
       showError(msg)
     } finally {
@@ -263,7 +271,7 @@ export default function QueryInterface({
         },
       })
     } catch (err) {
-      const msg = err.response?.data?.detail?.message || err.response?.data?.detail || err.message
+      const msg = extractApiErrorMessage(err, 'Query failed')
       setError(msg)
       showError(msg)
     } finally {
@@ -463,6 +471,21 @@ export default function QueryInterface({
               </button>
 
               <button
+                onClick={() => {
+                  setMultiStepQuestion(question)
+                  setShowMultiStepPlan(true)
+                }}
+                disabled={loading || !question.trim() || isMixedTypes}
+                className="brutalist-border bg-warning/30 px-6 py-2.5 rounded-xl font-heading font-bold text-sm soft-shadow active-press hover:bg-warning/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:active:transform-none disabled:active:shadow-[4px_4px_0px_0px_#1a1c1d]"
+                title="Create multi-step plan for complex queries"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base">account_tree</span>
+                  MULTI-STEP
+                </span>
+              </button>
+
+              <button
                 onClick={() => runSSEQuery(true)}
                 disabled={loading || !question.trim() || isMixedTypes}
                 className="brutalist-border bg-main px-8 py-3 rounded-xl font-heading font-black text-base soft-shadow active-press hover:bg-[#d8b4fe] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:active:transform-none disabled:active:shadow-[4px_4px_0px_0px_#1a1c1d]"
@@ -544,6 +567,27 @@ export default function QueryInterface({
           </>
         )}
       </div>
+
+      {/* Multi-Step Plan Modal */}
+      {showMultiStepPlan && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-8">
+          <div className="max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <MultiStepPlan
+              question={multiStepQuestion}
+              onClose={() => {
+                setShowMultiStepPlan(false)
+                setMultiStepQuestion('')
+              }}
+              onRunSingle={(singleQuestion) => {
+                setQuestion(singleQuestion)
+                setShowMultiStepPlan(false)
+                setMultiStepQuestion('')
+              }}
+              selectedDbIds={selectedDbIds}
+            />
+          </div>
+        </div>
+      )}
     </section>
   )
 }
