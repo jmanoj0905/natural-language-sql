@@ -21,6 +21,10 @@ class DiscoveredDatabase:
     password: Optional[str] = None
 
 
+# Get current system user as default DB user
+DEFAULT_POSTGRES_USER = os.environ.get("USER", "postgres")
+
+
 class DatabaseDiscoverer:
     """Discover databases running locally."""
 
@@ -60,38 +64,41 @@ class DatabaseDiscoverer:
         if not await self._is_port_open("localhost", port):
             return []
 
-        try:
-            # Try to connect to postgres database
-            conn = await asyncpg.connect(
-                host="localhost",
-                port=port,
-                database="postgres",
-                user="postgres",
-                password="",
-                timeout=3,
-            )
+        # Try current user first, then fallback to postgres
+        users_to_try = [DEFAULT_POSTGRES_USER, "postgres", "manojj"]
 
-            # Get list of databases
-            rows = await conn.fetch(
-                "SELECT datname FROM pg_database WHERE datistemplate = false"
-            )
-            databases = [row["datname"] for row in rows]
-            await conn.close()
-
-            # Return ALL discovered databases, not just the first one
-            return [
-                DiscoveredDatabase(
-                    name=db_name,
-                    db_type="postgresql",
+        for username in users_to_try:
+            try:
+                conn = await asyncpg.connect(
                     host="localhost",
                     port=port,
-                    username="postgres",
+                    database="postgres",
+                    user=username,
                     password="",
+                    timeout=3,
                 )
-                for db_name in databases
-            ]
-        except Exception:
-            return []
+
+                rows = await conn.fetch(
+                    "SELECT datname FROM pg_database WHERE datistemplate = false"
+                )
+                databases = [row["datname"] for row in rows]
+                await conn.close()
+
+                return [
+                    DiscoveredDatabase(
+                        name=db_name,
+                        db_type="postgresql",
+                        host="localhost",
+                        port=port,
+                        username=username,
+                        password="",
+                    )
+                    for db_name in databases
+                ]
+            except Exception as e:
+                continue
+
+        return []
 
     async def _check_mysql(self, port: int) -> List[DiscoveredDatabase]:
         """Check if MySQL is running on port and return ALL databases."""
