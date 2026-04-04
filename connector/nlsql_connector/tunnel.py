@@ -448,7 +448,18 @@ async def run_connector(key: str, backend_url: str, verbose: bool, no_discover: 
     if not no_discover:
         print("Discovering local databases...")
         discoverer = DatabaseDiscoverer()
-        databases = await discoverer.discover_all()
+        discovered_dbs = await discoverer.discover_all()
+
+        # Convert DiscoveredDatabase objects to dicts for JSON serialization
+        databases = [
+            {
+                "name": db.name,
+                "db_type": db.db_type,
+                "host": db.host,
+                "port": db.port,
+            }
+            for db in discovered_dbs
+        ]
 
         if not databases:
             print("No databases discovered. Using default config.")
@@ -463,12 +474,7 @@ async def run_connector(key: str, backend_url: str, verbose: bool, no_discover: 
 
         print(f"Found {len(databases)} database(s):")
         for db in databases:
-            if hasattr(db, "name"):  # DiscoveredDatabase object
-                print(f"  - {db.name} ({db.db_type}) at {db.host}:{db.port}")
-            else:  # dict
-                print(
-                    f"  - {db.get('name', 'unknown')} ({db.get('db_type', 'unknown')}) at {db.get('host', 'localhost')}:{db.get('port', 5432)}"
-                )
+            print(f"  - {db['name']} ({db['db_type']}) at {db['host']}:{db['port']}")
     else:
         databases = [
             {

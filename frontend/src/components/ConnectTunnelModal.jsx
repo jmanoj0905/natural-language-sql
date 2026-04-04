@@ -47,8 +47,8 @@ export default function ConnectTunnelModal({ onClose, onKeyGenerated }) {
             <h3 className="font-heading font-bold text-sm mb-2">How it works:</h3>
             <ol className="text-sm space-y-2 list-decimal list-inside">
               <li>Copy the command below</li>
-              <li>Run it on your computer where the database is running</li>
-              <li>Your local database will appear in the sidebar</li>
+              <li>Run it in terminal on your computer where database is running</li>
+              <li>Select which databases to add from the popup</li>
             </ol>
           </div>
 
@@ -60,14 +60,16 @@ export default function ConnectTunnelModal({ onClose, onKeyGenerated }) {
 
           {key ? (
             <div className="space-y-3">
-              <label className="block text-sm font-heading font-bold uppercase">Run this command:</label>
+              <label className="block text-sm font-heading font-bold uppercase">Run this exact command:</label>
               <div className="relative">
-                <code className="block w-full bg-[#1a1c1d] text-success p-4 pr-20 rounded-base font-mono text-xs break-all">
-                  nlsql-connector --key {key}
+                <code className="block w-full bg-[#1a1c1d] text-success p-4 pr-20 rounded-base font-mono text-xs break-all whitespace-pre-wrap">
+{`cd /path/to/natural-lang-sql/connector
+source .venv/bin/activate
+PYTHONPATH=. python nlsql_connector/tunnel.py --key ${key}`}
                 </code>
                 <button
-                  onClick={() => navigator.clipboard.writeText(`nlsql-connector --key ${key}`)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 material-symbols-outlined p-1.5 hover:bg-[#333] rounded text-white"
+                  onClick={() => navigator.clipboard.writeText(`cd /path/to/natural-lang-sql/connector\nsource .venv/bin/activate\nPYTHONPATH=. python nlsql_connector/tunnel.py --key ${key}`)}
+                  className="absolute right-2 top-2 material-symbols-outlined p-1.5 hover:bg-[#333] rounded text-white"
                   title="Copy command"
                 >
                   content_copy
@@ -102,10 +104,10 @@ export default function ConnectTunnelModal({ onClose, onKeyGenerated }) {
             </div>
           )}
 
-          <div className="border-t-2 border-border pt-4">
-            <h4 className="font-heading font-bold text-xs uppercase mb-2">Installation:</h4>
+          <div className="border-t-2 border-border pt-4 space-y-2">
+            <h4 className="font-heading font-bold text-xs uppercase">First time? Install first:</h4>
             <code className="block w-full bg-[#f8fafc] border border-border p-2 rounded-base font-mono text-xs">
-              pip install nlsql-connector
+              pip install websockets asyncpg aiomysql click
             </code>
           </div>
         </div>

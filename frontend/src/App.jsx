@@ -8,6 +8,7 @@ import DatabaseStatus from './components/DatabaseStatus'
 import SettingsModal from './components/SettingsModal'
 import ConnectTunnelModal from './components/ConnectTunnelModal'
 import TunnelStatus from './components/TunnelStatus'
+import TunnelDatabaseSelector from './components/TunnelDatabaseSelector'
 import { useToast } from './hooks/useToast.jsx'
 import { API_BASE, TUNNEL_ENDPOINTS } from './config'
 
@@ -21,6 +22,7 @@ function App() {
   const [aiMode, setAiMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tunnelModalOpen, setTunnelModalOpen] = useState(false)
+  const [tunnelDbSelectorOpen, setTunnelDbSelectorOpen] = useState(false)
   const [tunnelDatabases, setTunnelDatabases] = useState([])
   const [currentKey, setCurrentKey] = useState(null)
 
@@ -126,6 +128,16 @@ function App() {
     }, 15000)
     // Save interval ID to clear later
     window.__tunnelHeartbeatInterval = heartbeatInterval
+    
+    // Show database selector after key generated and connector connects
+    setTimeout(() => {
+      setTunnelDbSelectorOpen(true)
+    }, 3000)
+  }
+
+  const handleTunnelDatabasesSelected = (selectedDbIds) => {
+    // Add selected tunnel databases to selectedDbIds
+    setSelectedDbIds(prev => [...prev, ...selectedDbIds])
   }
 
   // Load tunnel databases periodically
@@ -272,7 +284,7 @@ function App() {
             )}
 
             <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
-              <div>ENGINE: OLLAMA | MODE: LOCAL_AI</div>
+              <div>ENGINE: CLOUD | MODE: AI</div>
               <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
             </footer>
           </div>
@@ -290,6 +302,13 @@ function App() {
         <ConnectTunnelModal
           onClose={() => setTunnelModalOpen(false)}
           onKeyGenerated={handleTunnelKeyGenerated}
+        />
+      )}
+
+      {tunnelDbSelectorOpen && (
+        <TunnelDatabaseSelector
+          onClose={() => setTunnelDbSelectorOpen(false)}
+          onDatabasesSelected={handleTunnelDatabasesSelected}
         />
       )}
     </div>

@@ -4,9 +4,9 @@ import { useToast } from '../hooks/useToast.jsx'
 import { API_BASE } from '../config'
 
 const HOW_TO_USE_STEPS = [
-  { icon: 'cable', text: 'Connect a database from the sidebar — enter host, port, credentials, and click Save.' },
+  { icon: 'hub', text: 'Click "Connect" in the header to add a local database via nlsql-connector.' },
   { icon: 'chat', text: 'Type a question in plain English, e.g. "Show me top 10 customers by revenue".' },
-  { icon: 'smart_toy', text: 'AI Mode generates SQL via Ollama locally. Toggle to Raw SQL to write queries yourself.' },
+  { icon: 'smart_toy', text: 'AI Mode generates SQL via Ollama. Toggle to Raw SQL to write queries yourself.' },
   { icon: 'table_view', text: 'Results appear below the query — export or copy the generated SQL as needed.' },
   { icon: 'history', text: 'Past queries are saved in the History tab for the current session.' },
 ]
@@ -62,12 +62,12 @@ export default function SettingsModal({ onClose, onClearHistory }) {
             </h3>
             <div className="brutalist-border rounded-xl overflow-hidden">
               <div className="divide-y divide-foreground/10">
-                <Row label="Provider" value="Ollama (local)" />
+                <Row label="Provider" value="Ollama (cloud)" />
                 <Row label="Model" value={
                   <span className="font-mono text-xs">mannix/defog-llama3-sqlcoder-8b</span>
                 } />
                 <Row label="Endpoint" value={
-                  <span className="font-mono text-xs">localhost:11434</span>
+                  <span className="font-mono text-xs">Render (cloud)</span>
                 } />
               </div>
             </div>
