@@ -1,6 +1,5 @@
 """Natural language query endpoints."""
 
-import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
@@ -17,17 +16,8 @@ from app.core.database.connection_manager import (
     DatabaseConnectionManager,
 )
 from app.core.ai.ollama_sql_generator import SQLGenerator
-from app.core.ai.ollama_client import get_ollama_client
-from app.core.ai.prompts import (
-    build_sql_generation_prompt,
-    extract_sql_from_response,
-    extract_explanation_from_response,
-    build_explanation,
-)
-from app.core.ai.query_planner import get_intent_detector
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
-from app.core.tunnel.query_router import get_query_router
 from app.dependencies import get_sql_generator, get_query_validator, get_query_executor
 from app.exceptions import NLSQLException
 from app.utils.logger import get_logger
@@ -36,194 +26,6 @@ from app.api.v1.endpoints.query_management import add_to_history
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
-
-
-def is_tunnel_database(database_id: str) -> bool:
-    """Check if database_id is a tunnel-based database."""
-    return database_id.startswith("machine_")
-
-
-async def execute_tunnel_query(
-    database_id: str,
-    sql: str,
-    execute: bool,
-    pagination: Optional[dict] = None,
-):
-    """Execute a query through the tunnel connection."""
-    query_router = get_query_router()
-
-    result = await query_router.route_query(
-        database_id=database_id,
-        sql=sql,
-    )
-
-    if not result.get("success", True) and "error" in result:
-        raise NLSQLException(
-            message=result.get("error", "Tunnel query failed"),
-            code=result.get("code", "TUNNEL_ERROR"),
-        )
-
-    return result
-
-
-async def handle_tunnel_query(
-    request: NaturalLanguageQueryRequest,
-    database_id: str,
-    db_manager: DatabaseConnectionManager,
-    settings,
-) -> QueryResponse:
-    """Handle a natural language query through tunnel."""
-    from app.core.tunnel.registry import get_tunnel_registry
-
-    registry = get_tunnel_registry()
-    query_router = get_query_router()
-    validator = get_query_validator()
-
-    machine_id, db_type, db_name = query_router.parse_database_id(database_id)
-
-    if not machine_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "INVALID_DATABASE_ID",
-                "message": "Invalid tunnel database ID format",
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
-
-    machine = registry.get_machine(machine_id)
-    if not machine or not machine.is_connected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "MACHINE_OFFLINE",
-                "message": f"Machine {machine_id} is not connected. Please run nlsql-connector.",
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
-
-    try:
-        # Fetch schema from the tunnel machine
-        schema_result = await query_router.route_query(
-            database_id=database_id, sql="", request_type="schema"
-        )
-        if not schema_result.get("success"):
-            raise NLSQLException(
-                message=schema_result.get("error", "Failed to fetch schema from tunnel"),
-                code="SCHEMA_FETCH_FAILED",
-            )
-
-        raw_schema = schema_result.get("schema", {})
-        schema_lines = [f"-- Database: {db_name}\n"]
-        for table_name, info in raw_schema.items():
-            col_defs = []
-            for col in info.get("columns", []):
-                null_str = "" if col.get("nullable", True) else " NOT NULL"
-                default_str = f" DEFAULT {col['default']}" if col.get("default") else ""
-                col_defs.append(f"  {col['name']} {col['type']}{null_str}{default_str}")
-            schema_lines.append(
-                f"CREATE TABLE {table_name} (\n" + ",\n".join(col_defs) + "\n);\n"
-            )
-        schema_context = "\n".join(schema_lines)
-
-        # Generate SQL with Ollama using the fetched schema
-        database_type = "MySQL" if (db_type or "").lower() == "mysql" else "PostgreSQL"
-        intent_detector = get_intent_detector()
-        query_plan = intent_detector.detect_intent(question=request.question, registered_dbs=[])
-        intent_context = {
-            "intent": query_plan.intent.value,
-            "database_refs": query_plan.database_refs,
-            "needs_decomposition": query_plan.needs_decomposition,
-        }
-        prompt = build_sql_generation_prompt(
-            question=request.question,
-            schema_context=schema_context,
-            database_type=database_type,
-            read_only=request.options.read_only,
-            intent_context=intent_context,
-        )
-        ai_client = get_ollama_client()
-        response_text = await ai_client.generate_content(prompt)
-        sql = extract_sql_from_response(response_text)
-        if not sql:
-            raise NLSQLException(
-                message="Failed to extract SQL from AI response",
-                code="AI_PARSE_ERROR",
-            )
-        explanation = extract_explanation_from_response(response_text) or build_explanation(request.question, sql)
-
-        if request.options.execute:
-            result = await execute_tunnel_query(
-                database_id=database_id,
-                sql=sql,
-                execute=True,
-            )
-
-            execution_result = None
-            if result.get("rows"):
-                execution_result = ExecutionResult(
-                    rows=result.get("rows", []),
-                    row_count=len(result.get("rows", [])),
-                    execution_time_ms=result.get("execution_time_ms", 0),
-                    columns=result.get("columns", []),
-                    total_rows=result.get("total_rows"),
-                )
-
-            return QueryResponse(
-                success=True,
-                question=request.question,
-                generated_sql=sql,
-                sql_explanation=explanation,
-                execution_result=execution_result,
-                metadata={
-                    "database_id": database_id,
-                    "database_nickname": f"{db_name} (tunnel)",
-                    "ai_model": settings.OLLAMA_MODEL,
-                    "timestamp": datetime.now().isoformat(),
-                    "executed": True,
-                    "is_tunnel": True,
-                    "machine_id": machine_id,
-                },
-            )
-
-        return QueryResponse(
-            success=True,
-            question=request.question,
-            generated_sql=sql,
-            sql_explanation=explanation,
-            execution_result=None,
-            metadata={
-                "database_id": database_id,
-                "database_nickname": f"{db_name} (tunnel)",
-                "ai_model": settings.OLLAMA_MODEL,
-                "timestamp": datetime.now().isoformat(),
-                "executed": False,
-                "is_tunnel": True,
-                "machine_id": machine_id,
-            },
-        )
-
-    except NLSQLException as e:
-        logger.error("tunnel_query_failed", error=str(e), error_code=e.code)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": e.code,
-                "message": e.message,
-                "details": e.details,
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
-    except Exception as e:
-        logger.error("tunnel_query_error", error=str(e), error_type=type(e).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "TUNNEL_ERROR",
-                "message": f"Tunnel query failed: {str(e)}",
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
 
 
 @router.post("/natural", response_model=QueryResponse)
@@ -284,6 +86,9 @@ async def natural_language_query(
                 db_id=target_db_id,
                 read_only=request.options.read_only,
                 registered_dbs=registered_dbs,
+                provider=request.options.provider,
+                model=request.options.model,
+                api_key=request.options.api_key,
             )
 
             logger.info(
@@ -336,7 +141,8 @@ async def natural_language_query(
             metadata={
                 "database_id": target_db_id,
                 "database_nickname": db_config.nickname,
-                "ai_model": settings.OLLAMA_MODEL,
+                "ai_model": request.options.model or settings.OLLAMA_MODEL,
+                "ai_provider": request.options.provider,
                 "timestamp": datetime.now().isoformat(),
                 "executed": request.options.execute,
             },
@@ -502,9 +308,6 @@ async def explain_query(
     executor: QueryExecutor = Depends(get_query_executor),
 ) -> ExplainResponse:
     """Get query execution plan (EXPLAIN) for debugging slow queries."""
-    from pydantic import BaseModel as PydanticBaseModel, Field
-    from typing import List, Dict, Any
-
     target_db_id = database_id or db_manager._default_db_id
 
     if not db_manager.is_configured or not target_db_id:

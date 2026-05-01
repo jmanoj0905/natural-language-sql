@@ -26,8 +26,6 @@ export default function AppSidebar({
   selectedDbIds,
   onSelectionChange,
   onDatabasesChanged,
-  onRemoveTunnelDb,
-  onShowTunnelSelector,
 }) {
   const { showSuccess, showError } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
@@ -167,16 +165,6 @@ export default function AppSidebar({
         Connect New
       </button>
 
-      {/* Add More from Tunnel - shows available unselected DBs */}
-      {typeof onShowTunnelSelector === 'function' && (
-        <button
-          onClick={onShowTunnelSelector}
-          className="w-full brutalist-border bg-white py-2 rounded-xl font-heading font-bold uppercase tracking-widest text-xs hover:bg-[#f1f5f9] transition-all"
-        >
-          + Add from Local
-        </button>
-      )}
-
       {/* Search */}
       {databases.length > 3 && (
         <div className="relative">
@@ -200,7 +188,6 @@ export default function AppSidebar({
         )}
         {filteredDbs.map(db => {
           const isSelected = selectedDbIds.includes(db.database_id)
-          const isTunnel = db.is_tunnel
           return (
             <div key={db.database_id} className="group">
               <button
@@ -211,48 +198,14 @@ export default function AppSidebar({
                     : 'text-foreground hover:bg-[#f1f5f9]'
                 }`}
               >
-                {/* Tunnel DB checkbox indicator */}
-                {isTunnel && (
-                  <div 
-                    className={`w-4 h-4 border-2 shrink-0 flex items-center justify-center ${
-                      isSelected 
-                        ? 'bg-success border-success' 
-                        : 'border-foreground/40'
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onSelectionChange(db.database_id)
-                    }}
-                  >
-                    {isSelected && <span className="text-white text-xs font-bold">✓</span>}
-                  </div>
-                )}
-                <DbIcon dbType={db.db_type} className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : isTunnel ? 'text-[#7d4e58]' : ''}`} />
-                <span className="truncate flex-1 text-left">
-                  {db.nickname || db.database_id}
-                  {isTunnel && <span className="text-[10px] ml-1 opacity-60 font-mono">(local)</span>}
-                </span>
+                <DbIcon dbType={db.db_type} className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : ''}`} />
+                <span className="truncate flex-1 text-left">{db.nickname || db.database_id}</span>
                 <div className={`w-2 h-2 rounded-full shrink-0 ${db.is_connected ? 'bg-[#86EFAC]' : 'bg-[#fca5a5]'}`} />
               </button>
-              {/* Hover actions */}
               <div className="flex items-center gap-1 px-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                {isTunnel ? (
-                  <>
-                    <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>
-                    <button 
-                      onClick={() => onRemoveTunnelDb?.(db.database_id)} 
-                      className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-danger rounded-lg transition-colors ml-auto"
-                    >
-                      Del
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>
-                    <button onClick={() => openEditForm(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Edit</button>
-                    <button onClick={() => setDeleteTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-danger rounded-lg transition-colors ml-auto">Del</button>
-                  </>
-                )}
+                <button onClick={() => setSchemaTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Schema</button>
+                <button onClick={() => openEditForm(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-main/40 rounded-lg transition-colors">Edit</button>
+                <button onClick={() => setDeleteTarget(db)} className="px-2 py-0.5 text-[10px] font-heading uppercase hover:bg-danger rounded-lg transition-colors ml-auto">Del</button>
               </div>
             </div>
           )

@@ -54,6 +54,10 @@ class TestValidateBasic:
         result = validator.validate("DELETE FROM users WHERE id=1;")
         assert "DELETE" in result
 
+    def test_ddl_raises(self, validator):
+        with pytest.raises(QueryValidationError, match="Only SELECT"):
+            validator.validate("DROP TABLE users;")
+
 
 class TestLimitEnforcement:
     def test_adds_limit_to_select(self, validator):
@@ -84,3 +88,16 @@ class TestLimitEnforcement:
     def test_limit_at_max_is_kept(self, validator):
         result = validator.validate("SELECT * FROM users LIMIT 1000;")
         assert "LIMIT 1000" in result
+
+
+class TestStrictValidation:
+    def test_strict_mode_uses_sanitizer(self):
+        settings = MagicMock()
+        settings.MAX_QUERY_RESULTS = 1000
+        settings.DEFAULT_QUERY_LIMIT = 100
+        settings.STRICT_SQL_VALIDATION = True
+        with patch("app.core.query.validator.get_settings", return_value=settings):
+            validator = QueryValidator()
+
+        with pytest.raises(QueryValidationError):
+            validator.validate("SELECT * FROM users -- comment")

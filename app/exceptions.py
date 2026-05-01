@@ -95,6 +95,17 @@ class QueryTimeoutError(QueryExecutionError):
         self.code = "QUERY_TIMEOUT"
 
 
+class ResultLimitExceededError(QueryExecutionError):
+    """Raised when a query result exceeds the configured maximum row count."""
+
+    def __init__(self, row_count: int, max_rows: int):
+        super().__init__(
+            f"Query returned {row_count} rows, which exceeds the maximum of {max_rows}",
+            details={"row_count": row_count, "max_rows": max_rows},
+        )
+        self.code = "RESULT_LIMIT_EXCEEDED"
+
+
 # AI API Exceptions (Ollama)
 class AIAPIError(NLSQLException):
     """Base exception for AI API errors."""
@@ -129,5 +140,4 @@ class TableNotFoundError(SchemaIntrospectionError):
             details={"table_name": table_name, "database_id": database_id}
         )
         self.code = "TABLE_NOT_FOUND"
-
 

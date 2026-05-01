@@ -14,7 +14,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'https://natural-language-sql-ue9l.onrender.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
         ws: true,
@@ -24,7 +24,7 @@ export default defineConfig({
   preview: {
     proxy: {
       '/api': {
-        target: 'https://natural-language-sql-ue9l.onrender.com',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
         ws: true,

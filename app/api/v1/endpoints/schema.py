@@ -5,7 +5,6 @@ from typing import List, Dict, Any, Optional
 
 from app.core.database.connection_manager import get_db_manager
 from app.core.database.schema_inspector import SchemaInspector
-from app.core.tunnel.query_router import get_query_router
 from app.utils.logger import get_logger
 from sqlalchemy import text
 
@@ -14,70 +13,6 @@ router = APIRouter(prefix="/schema", tags=["schema"])
 
 # Initialize schema inspector
 schema_inspector = SchemaInspector()
-
-
-async def get_tunnel_schema(database_id: str) -> Dict[str, Any]:
-    """Get schema from a tunnel-connected database."""
-    from app.core.tunnel.registry import get_tunnel_registry
-
-    registry = get_tunnel_registry()
-    query_router = get_query_router()
-
-    machine_id, db_type, db_name = query_router.parse_database_id(database_id)
-
-    if not machine_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": "Invalid tunnel database ID", "code": "INVALID_DB_ID"},
-        )
-
-    machine = registry.get_machine(machine_id)
-    if not machine or not machine.is_connected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": f"Machine {machine_id} is not connected",
-                "code": "MACHINE_OFFLINE",
-            },
-        )
-
-    # Request schema from connector
-    query_router = get_query_router()
-    result = await query_router.route_query(
-        database_id=database_id, sql="", request_type="schema"
-    )
-
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": result.get("error", "Failed to get schema"),
-                "code": "SCHEMA_FAILED",
-            },
-        )
-
-    schema = result.get("schema", {})
-    tables = []
-    for table_name, table_info in schema.items():
-        tables.append(
-            {
-                "name": table_name,
-                "type": table_info.get("type", "TABLE"),
-                "columns": table_info.get("columns", []),
-            }
-        )
-
-    return {
-        "success": True,
-        "database_id": database_id,
-        "tables": tables,
-        "table_count": len(tables),
-    }
-
-
-def is_tunnel_database(database_id: str) -> bool:
-    """Check if database_id is a tunnel-based database."""
-    return database_id.startswith("machine_")
 
 
 @router.get("", response_model=Dict[str, Any])
@@ -91,10 +26,6 @@ async def get_database_schema(
 
     Returns information about all tables and their columns.
     """
-    # Check if it's a tunnel database
-    if database_id and is_tunnel_database(database_id):
-        return await get_tunnel_schema(database_id)
-
     db_manager = get_db_manager()
 
     # Determine which database to use

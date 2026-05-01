@@ -183,27 +183,19 @@ class QueryExecutor:
                 None,
             )
 
-        rows = result.mappings().all()
-        total_rows = len(rows)
+        all_rows = result.mappings().all()
+        total_rows = len(all_rows)
+        rows = all_rows
 
         if pagination and pagination.get("limit"):
             offset = pagination.get("offset", 0)
             limit = pagination["limit"]
-            rows = rows[offset : offset + limit]
-            total_rows = len(rows)
+            rows = all_rows[offset : offset + limit]
 
         results = [
             {col: self._serialize_value(val) for col, val in row.items()}
             for row in rows
         ]
-
-        total_count = None
-        if pagination:
-            total_count = (
-                len(rows)
-                if not isinstance(rows, list)
-                else len(result.mappings().all())
-            )
 
         return results, total_rows
 

@@ -1,11 +1,11 @@
 # Natural Language SQL Engine
 
-> Ask your database questions in plain English. Get SQL and results instantly — all AI runs locally via Ollama, no API keys, no cloud costs.
+> Ask your database questions in plain English. Get SQL and results instantly. Use local Ollama by default, or select a cloud model when you need one.
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://react.dev)
-[![License](https://img.shields.io/badge/License-GPL--3.0-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL--3.0-yellow.svg)](LICENSE.txt)
 
 ---
 
@@ -13,13 +13,13 @@
 
 Type a question like *"show me the top 10 customers by revenue last month"* — the engine generates SQL, validates it, executes it against your database, and streams results back in real time. No SQL knowledge required.
 
-**Stack:** FastAPI + SQLAlchemy async (backend) · React 18 + Vite + Tailwind (frontend) · Ollama CLI (local AI)
+**Stack:** FastAPI + SQLAlchemy async (backend) · React 18 + Vite + Tailwind (frontend) · Ollama/OpenAI/Gemini/Groq model routing
 
 ---
 
 ## Features
 
-- **Local AI only** — Ollama runs on your machine. No OpenAI, no Anthropic, no data leaves your network.
+- **Local AI by default** — Ollama runs on your machine. Optional OpenAI, Gemini, and Groq providers are available from Settings.
 - **PostgreSQL & MySQL** — Connect multiple databases simultaneously, switch between them in one click.
 - **Multi-DB fan-out** — Run the same query across several databases in parallel and merge results.
 - **Real-time streaming** — SSE pipeline shows live progress: Connect → Schema → AI → Validate → Execute.
@@ -30,71 +30,6 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 - **Query history** — Every query saved for the session with SQL, explanation, row count, and timing.
 - **Encrypted credentials** — Database passwords stored with Fernet encryption in `~/.nlsql/databases.json`.
 - **Schema-aware AI** — Prompt includes CREATE TABLE statements, foreign key relationships, and 3 sample rows per table for accurate SQL generation.
-- **Connect local databases** — Use `nlsql-connector` to expose your local Postgres/MySQL to the cloud backend (see below).
-
----
-
-## Connect Local Databases (Tunnel)
-
-You can connect your local databases running on `localhost` to a cloud-deployed NLSQL backend. This is useful when:
-
-- Backend is deployed (e.g., on Render)
-- Database is on your local machine (behind firewall/router)
-
-### How It Works
-
-```mermaid
-flowchart LR
-    subgraph User["Your Machine"]
-        PG[PostgreSQL<br/>:5432] --> CD[nlsql-connector]
-        MY[MySQL<br/>:3306] --> CD
-    end
-    
-    CD -.-> |WebSocket| BE[Cloud Backend<br/>NLSQL]
-    
-    BE --> |Queries| CD
-    CD --> |Results| BE
-```
-
-The `nlsql-connector` runs on your machine, auto-discovers local databases, and creates a secure WebSocket tunnel to the backend.
-
-### Step-by-Step
-
-1. **Open NLSQL in your browser** (e.g., https://your-nlsql-deployment.onrender.com)
-2. **Click the "Connect" button** in the header
-3. **Copy the key** shown (e.g., `nlsql_key_xxx`)
-4. **Install and run the connector** on your machine:
-
-```bash
-# Install
-pip install nlsql-connector
-
-# Run with your key
-nlsql-connector --key nlsql_key_xxx
-```
-
-5. **Your local databases appear** in the sidebar — select one and start querying!
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--key, -k` | **Required** — Tunnel key from frontend |
-| `--url, -u` | Backend URL (default: your deployed URL) |
-| `--verbose, -v` | Debug output |
-| `--no-discover` | Skip auto-discovery, use defaults |
-
-### Key Behavior
-
-- **Same key persists** — If you close the browser and come back, the same key reconnects automatically
-- **Force close** — If you crash or force-quit the connector, the key is invalidated (regenerate from frontend)
-- **Multiple machines** — You can run connectors on multiple machines; each gets its own key; all databases appear in the sidebar
-
-### Troubleshooting
-
-- **"Failed to connect"** — Check your network, verify the backend URL is correct
-- **"Registration failed"** — The key may have expired; generate a new one from the frontend
-- **"No databases discovered"** — Use `--no-discover` to use default config, or ensure PostgreSQL/MySQL is running on localhost
 
 ---
 
@@ -157,7 +92,7 @@ All configuration is via environment variables in `.env` (copy from `.env.exampl
 | `DEFAULT_QUERY_LIMIT` | `100` | Auto-added LIMIT for SELECT queries |
 | `QUERY_TIMEOUT_SECONDS` | `30` | Per-query execution timeout |
 | `DB_ENCRYPTION_KEY` | *(auto-generated)* | Fernet key for password storage |
-| `STRICT_SQL_VALIDATION` | `false` | Block comments and edge-case patterns |
+| `STRICT_SQL_VALIDATION` | `false` | Opt into stricter sanitizer checks |
 | `SCHEMA_CACHE_TTL_SECONDS` | `3600` | Schema cache lifetime (1 hour) |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
 
@@ -230,31 +165,6 @@ curl "http://localhost:8000/api/v1/schema?database_id=mydb"
 curl -X POST http://localhost:8000/api/v1/schema/cache/clear
 ```
 
-### Tunnel (Local Database Connector)
-
-```bash
-# Generate a new tunnel key (from frontend)
-curl -X POST http://localhost:8000/api/v1/tunnel/generate-key
-
-# Get connected machines status
-curl http://localhost:8000/api/v1/tunnel/status
-
-# Get available tunnel databases
-curl http://localhost:8000/api/v1/tunnel/available-databases
-
-# Send heartbeat (keeps key valid after browser close)
-curl -X POST http://localhost:8000/api/v1/tunnel/heartbeat \
-  -H "Content-Type: application/json" \
-  -d '{"key": "nlsql_key_xxx"}'
-
-# Graceful disconnect (key remains valid)
-curl -X POST http://localhost:8000/api/v1/tunnel/disconnect \
-  -H "Content-Type: application/json" \
-  -d '{"key": "nlsql_key_xxx"}'
-```
-
----
-
 ## Project Structure
 
 ```
@@ -268,21 +178,16 @@ natural-lang-sql/
 │   │   ├── query_stream.py           # /query/natural/stream (SSE)
 │   │   ├── schema.py                 # /schema endpoints
 │   │   ├── database.py               # /databases CRUD
-│   │   ├── tunnel.py                 # /tunnel endpoints (WebSocket)
 │   │   └── health.py                 # /health endpoints
 │   └── core/
 │       ├── ai/
-│       │   ├── ollama_client.py      # httpx client for Ollama /api/generate
+│       │   ├── ollama_client.py      # Provider clients and routing
 │       │   ├── ollama_sql_generator.py
 │       │   └── prompts.py            # Prompt templates + SQL/explanation extraction
 │       ├── database/
 │       │   ├── connection_manager.py # Engine pool, Fernet-encrypted credentials
 │       │   ├── schema_inspector.py   # Schema introspection with TTL cache
 │       │   └── adapters/             # PostgreSQL + MySQL adapters
-│       ├── tunnel/                   # Local database connector support
-│       │   ├── key_manager.py        # Tunnel key generation/validation
-│       │   ├── registry.py           # Machine connection state
-│       │   └── query_router.py       # Route queries to correct machine
 │       ├── query/
 │       │   ├── validator.py          # SQL validation, LIMIT enforcement
 │       │   └── executor.py           # Async execution with timeout
@@ -291,23 +196,16 @@ natural-lang-sql/
 ├── frontend/                         # React 18 + Vite SPA
 │   └── src/
 │       ├── App.jsx                   # Top nav, sidebar, tab routing
-│       ├── config.js                 # Shared API_BASE + tunnel endpoints
+│       ├── config.js                 # Shared API_BASE
 │       ├── components/
 │       │   ├── AppSidebar.jsx        # DB list, connect/edit/delete modals
 │       │   ├── QueryInterface.jsx    # NL input, SSE streaming, SQL preview
 │       │   ├── ResultsDisplay.jsx    # Sortable table, pagination, export
 │       │   ├── QueryHistory.jsx      # Session query history
-│       │   ├── QueryProgress.jsx    # 5-stage pipeline indicator
-│       │   ├── ConnectTunnelModal.jsx # Tunnel key generation UI
-│       │   └── TunnelStatus.jsx      # Connected machines display
+│       │   ├── QueryProgress.jsx     # 5-stage pipeline indicator
+│       │   └── SettingsModal.jsx     # Provider selection and app actions
 │       └── utils/
 │           └── sql.js                # detectWriteOp utility
-├── connector/                        # nlsql-connector (local DB tunnel agent)
-│   ├── nlsql_connector/
-│   │   ├── main.py                  # CLI entry point
-│   │   ├── discoverer.py            # Auto-discover local Postgres/MySQL
-│   │   └── tunnel.py                 # WebSocket client + query proxy
-│   └── pyproject.toml               # Package config
 ├── tests/                            # pytest test suite
 ├── requirements.txt
 ├── install.sh                        # One-command setup
@@ -339,11 +237,11 @@ sequenceDiagram
         D-->>B: Schema + 3 sample rows
         
         Note over B: [3] AI
-        B->>O: POST /api/generate (prompt)
+        B->>O: Generate SQL with selected provider
         O-->>B: Generated SQL
         
         Note over B: [4] Validate
-        B->>B: sqlparse + injection scan
+        B->>B: sqlparse + operation/statement limits
         
         Note over B: [5] Execute
         B->>D: Run SQL query
@@ -361,8 +259,10 @@ User question → Frontend sends to Backend → Backend connects to DB → Fetch
 ## Security Notes
 
 - **Credentials** are Fernet-encrypted at rest in `~/.nlsql/databases.json`. Generate a stable key and set `DB_ENCRYPTION_KEY` in `.env` — otherwise a new key is generated on each restart, making saved passwords unrecoverable.
-- **SQL injection** is blocked by a pattern sanitizer before execution. Enable `STRICT_SQL_VALIDATION=true` for stricter rules.
-- **Write operations** (INSERT/UPDATE/DELETE) are unrestricted by default. The UI shows warning banners; use a read-only DB user if you want a hard block.
+- **SQL execution** is limited to single SELECT/INSERT/UPDATE/DELETE statements, with one supported compound shape: write statement followed by SELECT.
+- **SELECT queries** get a default LIMIT when missing and excessive LIMIT values are capped.
+- **Strict validation** can be enabled with `STRICT_SQL_VALIDATION=true` to block comments and other suspicious SQL patterns.
+- **Write operations** (INSERT/UPDATE/DELETE) are allowed by default. The UI shows warning banners; use a read-only DB user if you want a hard block.
 - **CORS** defaults to `http://localhost:3000`. Set `CORS_ORIGINS` for production.
 
 ```bash
@@ -391,6 +291,6 @@ cd frontend && npm run dev
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE) for details.
+GPL-3.0 — see [LICENSE.txt](LICENSE.txt) for details.
 
 **Author:** Manoj J · [jmanoj.pages.dev](https://jmanoj.pages.dev) · [github.com/jmanoj0905](https://github.com/jmanoj0905)

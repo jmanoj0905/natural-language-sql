@@ -1,14 +1,15 @@
 """Database connection management endpoints."""
 
+from typing import Dict, Any, Optional
+
 from fastapi import APIRouter, HTTPException, status
-from typing import List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 
 from app.core.database.connection_manager import get_db_manager
 from app.core.database.adapters import get_adapter
 from app.models.database import DatabaseConfig, DatabaseInfo, DatabaseListResponse
 from app.utils.logger import get_logger
-from sqlalchemy import text
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/databases", tags=["databases"])
@@ -17,18 +18,24 @@ router = APIRouter(prefix="/databases", tags=["databases"])
 class DatabaseConfigRequest(BaseModel):
     """Request model for database configuration."""
 
-    database_id: str = Field(..., description="Unique identifier for this database connection")
-    nickname: str = Field(None, description="Friendly display name")
-    db_type: str = Field(default="postgresql", description="Database type: postgresql or mysql")
+    database_id: str = Field(
+        ..., description="Unique identifier for this database connection"
+    )
+    nickname: Optional[str] = Field(None, description="Friendly display name")
+    db_type: str = Field(
+        default="postgresql", description="Database type: postgresql or mysql"
+    )
     host: str = Field(..., description="Database host address")
     port: int = Field(..., description="Database port", ge=1, le=65535)
     database: str = Field(..., description="Database name")
     username: str = Field(..., description="Database username")
-    password: str = Field(..., description="Database password")
-    ssl_mode: str = Field(default="prefer", description="SSL mode (disable, prefer, require)")
+    password: str = Field(default="", description="Database password")
+    ssl_mode: str = Field(
+        default="prefer", description="SSL mode (disable, prefer, require)"
+    )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "database_id": "prod-postgres-001",
                 "host": "localhost",
@@ -36,10 +43,81 @@ class DatabaseConfigRequest(BaseModel):
                 "database": "myapp",
                 "username": "readonly_user",
                 "password": "secure_password",
-                "ssl_mode": "prefer"
+                "ssl_mode": "prefer",
             }
         }
+    )
 
+
+def _resolve_password(
+    config: DatabaseConfigRequest, existing_database_id: Optional[str] = None
+) -> str:
+    """Resolve sentinel or blank passwords to the existing saved password when editing."""
+    db_manager = get_db_manager()
+    lookup_id = existing_database_id or config.database_id
+
+    if (
+        config.password == "__KEEP__" or not config.password
+    ) and lookup_id in db_manager.list_databases():
+        return db_manager.get_database_config(lookup_id).password
+
+    if config.password == "__KEEP__":
+        raise ValueError("Existing password is not available for this database.")
+
+    return config.password
+
+
+def _build_database_config(
+    config: DatabaseConfigRequest,
+    *,
+    database_id: Optional[str] = None,
+    password: Optional[str] = None,
+) -> DatabaseConfig:
+    """Convert an API request into the internal database configuration model."""
+    return DatabaseConfig(
+        database_id=database_id or config.database_id,
+        nickname=config.nickname,
+        db_type=config.db_type,
+        host=config.host,
+        port=config.port,
+        database=config.database,
+        username=config.username,
+        password=config.password if password is None else password,
+        ssl_mode=config.ssl_mode,
+    )
+
+
+async def _probe_database_config(db_config: DatabaseConfig) -> Dict[str, Any]:
+    """Open a temporary connection to verify credentials before persisting them."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    adapter = get_adapter(db_config.db_type)
+    connection_url = adapter.build_connection_url(db_config)
+    engine = create_async_engine(
+        connection_url,
+        pool_pre_ping=True,
+        pool_size=1,
+        max_overflow=0,
+    )
+
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version()"))
+            version_info = result.fetchone()
+
+            size_query, size_params = adapter.get_size_query(db_config)
+            size_result = await conn.execute(text(size_query), size_params)
+            db_size = size_result.fetchone()[0] or "0 MB"
+
+        return {
+            "version": version_info[0] if version_info else "Unknown",
+            "size": db_size,
+            "host": db_config.host,
+            "port": db_config.port,
+            "database": db_config.database,
+        }
+    finally:
+        await engine.dispose()
 
 
 @router.post("", response_model=Dict[str, Any])
@@ -83,26 +161,12 @@ async def register_database(config: DatabaseConfigRequest):
                 }
             )
 
-        # Convert request to DatabaseConfig
-        db_config = DatabaseConfig(
-            database_id=config.database_id,
-            nickname=config.nickname,
-            db_type=config.db_type,
-            host=config.host,
-            port=config.port,
-            database=config.database,
-            username=config.username,
-            password=config.password,
-            ssl_mode=config.ssl_mode
-        )
+        db_config = _build_database_config(config)
 
-        # Register the database
+        # Verify before persistence so failed registrations do not dirty saved state.
+        await _probe_database_config(db_config)
+
         db_manager.register_database(config.database_id, db_config)
-
-        # Test connection
-        async with db_manager.get_connection(config.database_id) as conn:
-            result = await conn.execute(text("SELECT 1"))
-            result.fetchone()
 
         logger.info(
             "database_registered_successfully",
@@ -125,6 +189,9 @@ async def register_database(config: DatabaseConfigRequest):
     except HTTPException:
         raise
     except Exception as e:
+        human_msg = _humanize_connection_error(
+            e, config.host, config.port, config.database, config.username
+        )
         logger.error(
             "database_registration_failed",
             database_id=config.database_id,
@@ -133,7 +200,7 @@ async def register_database(config: DatabaseConfigRequest):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": f"Failed to register database: {str(e)}",
+                "message": f"Failed to register database: {human_msg}",
                 "code": "DATABASE_REGISTRATION_FAILED"
             }
         )
@@ -352,62 +419,21 @@ async def test_database_connection(config: DatabaseConfigRequest):
     )
 
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
+        password = _resolve_password(config)
+        db_config = _build_database_config(config, database_id="__test__", password=password)
+        database_info = await _probe_database_config(db_config)
 
-        # Build a DatabaseConfig so the adapter can work with it.
-        # database_id is required by the model but never persisted here.
-        db_config = DatabaseConfig(
-            database_id="__test__",
-            db_type=config.db_type or "postgresql",
+        logger.info(
+            "database_connection_test_successful",
             host=config.host,
-            port=config.port,
-            database=config.database,
-            username=config.username,
-            password=config.password,
-            ssl_mode=config.ssl_mode
+            database=config.database
         )
 
-        adapter = get_adapter(db_config.db_type)
-        connection_url = adapter.build_connection_url(db_config)
-
-        engine = create_async_engine(
-            connection_url,
-            pool_pre_ping=True,
-            pool_size=1,
-            max_overflow=0
-        )
-
-        try:
-            async with engine.connect() as conn:
-                # version() is standard SQL on both PostgreSQL and MySQL
-                result = await conn.execute(text("SELECT version()"))
-                version_info = result.fetchone()
-
-                # Engine-specific size query via adapter
-                size_query, size_params = adapter.get_size_query(db_config)
-                size_result = await conn.execute(text(size_query), size_params)
-                db_size = size_result.fetchone()[0] or "0 MB"
-
-            logger.info(
-                "database_connection_test_successful",
-                host=config.host,
-                database=config.database
-            )
-
-            return {
-                "success": True,
-                "message": "Connection successful",
-                "database_info": {
-                    "version": version_info[0] if version_info else "Unknown",
-                    "size": db_size,
-                    "host": config.host,
-                    "port": config.port,
-                    "database": config.database
-                }
-            }
-
-        finally:
-            await engine.dispose()
+        return {
+            "success": True,
+            "message": "Connection successful",
+            "database_info": database_info,
+        }
 
     except Exception as e:
         human_msg = _humanize_connection_error(e, config.host, config.port, config.database, config.username)
@@ -606,34 +632,18 @@ async def update_database(database_id: str, config: DatabaseConfigRequest):
         )
 
     try:
-        # If password is empty, keep the existing one (it stays encrypted on disk)
-        password = config.password
-        if not password:
-            existing_config = db_manager.get_database_config(database_id)
-            password = existing_config.password
-
-        # Tear down the old engine
-        await db_manager.disconnect_database(database_id)
-
-        # Build updated config
-        db_config = DatabaseConfig(
+        password = _resolve_password(config, existing_database_id=database_id)
+        db_config = _build_database_config(
+            config,
             database_id=database_id,
-            nickname=config.nickname,
-            db_type=config.db_type,
-            host=config.host,
-            port=config.port,
-            database=config.database,
-            username=config.username,
             password=password,
-            ssl_mode=config.ssl_mode
         )
 
-        # Re-register (creates engine + saves to disk)
-        db_manager.register_database(database_id, db_config)
+        # Verify before replacing the working engine.
+        await _probe_database_config(db_config)
 
-        # Verify the new connection works
-        async with db_manager.get_connection(database_id) as conn:
-            await conn.execute(text("SELECT 1"))
+        await db_manager.disconnect_database(database_id)
+        db_manager.register_database(database_id, db_config)
 
         logger.info("database_updated", database_id=database_id)
 
@@ -644,11 +654,14 @@ async def update_database(database_id: str, config: DatabaseConfigRequest):
         }
 
     except Exception as e:
+        human_msg = _humanize_connection_error(
+            e, config.host, config.port, config.database, config.username
+        )
         logger.error("database_update_failed", database_id=database_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": f"Failed to update database: {str(e)}",
+                "message": f"Failed to update database: {human_msg}",
                 "code": "DATABASE_UPDATE_FAILED"
             }
         )

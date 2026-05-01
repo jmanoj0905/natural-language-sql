@@ -1,7 +1,7 @@
 """Pydantic models for database connections."""
 
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DatabaseConfig(BaseModel):
@@ -25,8 +25,8 @@ class DatabaseConfig(BaseModel):
         None, description="Machine ID for tunnel connections"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "database_id": "prod-db",
                 "nickname": "Production Database",
@@ -38,6 +38,7 @@ class DatabaseConfig(BaseModel):
                 "ssl_mode": "prefer",
             }
         }
+    )
 
 
 class DatabaseConnectionTest(BaseModel):

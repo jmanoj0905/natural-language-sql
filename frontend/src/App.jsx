@@ -6,17 +6,11 @@ import ResultsDisplay from './components/ResultsDisplay'
 import QueryHistory from './components/QueryHistory'
 import DatabaseStatus from './components/DatabaseStatus'
 import SettingsModal from './components/SettingsModal'
-import ConnectTunnelModal from './components/ConnectTunnelModal'
-import TunnelStatus from './components/TunnelStatus'
-import TunnelDatabaseSelector from './components/TunnelDatabaseSelector'
-import LoginPage from './components/LoginPage'
 import { useToast } from './hooks/useToast.jsx'
-import { API_BASE, TUNNEL_ENDPOINTS } from './config'
-import { useAuth, UserButton } from '@clerk/react'
+import { API_BASE } from './config'
 
 function App() {
   useToast()
-  const { isLoaded, isSignedIn } = useAuth()
   const [databases, setDatabases] = useState([])
   const [selectedDbIds, setSelectedDbIds] = useState([])
   const [queryHistory, setQueryHistory] = useState([])
@@ -24,10 +18,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('query')
   const [aiMode, setAiMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [tunnelModalOpen, setTunnelModalOpen] = useState(false)
-  const [tunnelDbSelectorOpen, setTunnelDbSelectorOpen] = useState(false)
-  const [tunnelDatabases, setTunnelDatabases] = useState([])
-  const [currentKey, setCurrentKey] = useState(null)
+  const [modelConfig, setModelConfig] = useState({ provider: 'ollama', model: '', apiKey: '' })
 
   useEffect(() => {
     document.body.classList.add('cursor-active')
@@ -60,10 +51,10 @@ function App() {
 
     const handleMouseOver = (e) => {
       const target = e.target
-      if (target.tagName === 'A' || target.tagName === 'BUTTON' || 
+      if (target.tagName === 'A' || target.tagName === 'BUTTON' ||
           target.closest('button') || target.closest('a') ||
           target.getAttribute('role') === 'button' ||
-          target.tagName === 'INPUT' || target.tagName === 'SELECT' || 
+          target.tagName === 'INPUT' || target.tagName === 'SELECT' ||
           target.tagName === 'TEXTAREA') {
         dot.classList.add('hovering')
         outline.classList.add('hovering')
@@ -72,10 +63,10 @@ function App() {
 
     const handleMouseOut = (e) => {
       const target = e.target
-      if (target.tagName === 'A' || target.tagName === 'BUTTON' || 
+      if (target.tagName === 'A' || target.tagName === 'BUTTON' ||
           target.closest('button') || target.closest('a') ||
           target.getAttribute('role') === 'button' ||
-          target.tagName === 'INPUT' || target.tagName === 'SELECT' || 
+          target.tagName === 'INPUT' || target.tagName === 'SELECT' ||
           target.tagName === 'TEXTAREA') {
         dot.classList.remove('hovering')
         outline.classList.remove('hovering')
@@ -99,65 +90,7 @@ function App() {
 
   useEffect(() => {
     loadDatabases()
-    loadTunnelDatabases()
-    const interval = setInterval(() => {
-      loadDatabases()
-      loadTunnelDatabases()
-    }, 30000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const loadTunnelDatabases = async () => {
-    try {
-      const resp = await axios.get(TUNNEL_ENDPOINTS.availableDatabases)
-      setTunnelDatabases(resp.data.databases || [])
-    } catch (err) {
-      console.error('Failed to load tunnel databases:', err)
-    }
-  }
-
-  const handleTunnelKeyGenerated = (key) => {
-    setCurrentKey(key)
-    // Start sending heartbeat
-    const heartbeatInterval = setInterval(async () => {
-      if (key) {
-        try {
-          await axios.post(TUNNEL_ENDPOINTS.heartbeat, { key })
-          loadTunnelDatabases()
-        } catch (err) {
-          // Ignore heartbeat errors
-        }
-      }
-    }, 15000)
-    // Save interval ID to clear later
-    window.__tunnelHeartbeatInterval = heartbeatInterval
-  }
-
-  // Show database selector manually via button, not auto
-  const handleShowDbSelector = () => {
-    loadTunnelDatabases()
-    setTunnelDbSelectorOpen(true)
-  }
-
-  const handleTunnelDatabasesSelected = (selectedDbIds) => {
-    // Add selected tunnel databases to selectedDbIds (only add new ones not already selected)
-    setSelectedDbIds(prev => {
-      const existing = new Set(prev)
-      const newIds = selectedDbIds.filter(id => !existing.has(id))
-      return [...prev, ...newIds]
-    })
-  }
-
-  const handleRemoveTunnelDb = (dbId) => {
-    // Remove from selected
-    setSelectedDbIds(prev => prev.filter(id => id !== dbId))
-    // Also remove from tunnelDatabases display list
-    setTunnelDatabases(prev => prev.filter(db => db.database_id !== dbId))
-  }
-
-  // Load tunnel databases periodically
-  useEffect(() => {
-    const interval = setInterval(loadTunnelDatabases, 10000)
+    const interval = setInterval(loadDatabases, 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -171,28 +104,10 @@ function App() {
   }
 
   const handleSelectionChange = (dbId) => {
-    // Check if it's a tunnel database
-    if (dbId.startsWith('machine_')) {
-      setSelectedDbIds(prev =>
-        prev.includes(dbId) ? prev.filter(id => id !== dbId) : [...prev, dbId]
-      )
-      return
-    }
-    // Regular database
     setSelectedDbIds(prev =>
       prev.includes(dbId) ? prev.filter(id => id !== dbId) : [...prev, dbId]
     )
   }
-
-  // Combine regular and tunnel databases for display
-  const allDatabases = [
-    ...databases,
-    ...tunnelDatabases.map(db => ({
-      ...db,
-      is_tunnel: true,
-      nickname: db.name,
-    }))
-  ]
 
   const handleQueryResult = (result) => {
     setCurrentResult(result)
@@ -216,19 +131,6 @@ function App() {
         ? 'text-[#7d4e58] border-b-2 border-[#7d4e58] pb-1'
         : 'text-foreground hover:bg-[#e2e8f0] px-3 py-1 rounded-full active:translate-x-[1px] active:translate-y-[1px]'
     }`
-
-  // Show blank screen while Clerk initializes
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-foreground border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
-
-  if (!isSignedIn) {
-    return <LoginPage />
-  }
 
   return (
     <div className="bg-background text-foreground min-h-screen">
@@ -259,14 +161,6 @@ function App() {
 
           <DatabaseStatus databases={databases} />
           <button
-            onClick={() => setTunnelModalOpen(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-heading border-2 border-border rounded-full hover:bg-[#e2e8f0] transition-colors"
-            title="Connect local database"
-          >
-            <span className="material-symbols-outlined text-sm">hub</span>
-            <span className="hidden sm:inline">Connect</span>
-          </button>
-          <button
             onClick={loadDatabases}
             className="material-symbols-outlined p-2 text-foreground hover:bg-[#e2e8f0] transition-colors rounded-full active:translate-x-[1px] active:translate-y-[1px]"
             title="Reload"
@@ -280,32 +174,28 @@ function App() {
           >
             settings
           </button>
-          <UserButton />
         </div>
       </header>
 
       <div className="flex">
-        {/* Sidebar */}
         <AppSidebar
-          databases={allDatabases}
+          databases={databases}
           selectedDbIds={selectedDbIds}
           onSelectionChange={handleSelectionChange}
           onDatabasesChanged={loadDatabases}
-          onRemoveTunnelDb={handleRemoveTunnelDb}
-          onShowTunnelSelector={handleShowDbSelector}
         />
 
-        {/* Main Content */}
         <main className="ml-64 w-full min-h-[calc(100vh-64px)] p-8 hatch-pattern">
           <div className="max-w-6xl mx-auto space-y-8">
             {activeTab === 'query' && (
               <>
                 <QueryInterface
                   onResult={handleQueryResult}
-                  databases={allDatabases}
+                  databases={databases}
                   selectedDbIds={selectedDbIds}
                   onDatabaseSelectionChange={handleSelectionChange}
                   aiMode={aiMode}
+                  modelConfig={modelConfig}
                 />
                 {currentResult && <ResultsDisplay result={currentResult} />}
               </>
@@ -315,7 +205,7 @@ function App() {
             )}
 
             <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
-              <div>ENGINE: CLOUD | MODE: AI</div>
+              <div>ENGINE: {modelConfig.provider.toUpperCase()} | MODEL: {(modelConfig.model || 'AUTO').toUpperCase()}</div>
               <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
             </footer>
           </div>
@@ -326,20 +216,8 @@ function App() {
         <SettingsModal
           onClose={() => setSettingsOpen(false)}
           onClearHistory={() => setQueryHistory([])}
-        />
-      )}
-
-      {tunnelModalOpen && (
-        <ConnectTunnelModal
-          onClose={() => setTunnelModalOpen(false)}
-          onKeyGenerated={handleTunnelKeyGenerated}
-        />
-      )}
-
-      {tunnelDbSelectorOpen && (
-        <TunnelDatabaseSelector
-          onClose={() => setTunnelDbSelectorOpen(false)}
-          onDatabasesSelected={handleTunnelDatabasesSelected}
+          modelConfig={modelConfig}
+          onModelConfigChange={setModelConfig}
         />
       )}
     </div>

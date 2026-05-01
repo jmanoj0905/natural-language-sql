@@ -1,7 +1,7 @@
 """Pydantic models for query requests and responses."""
 
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class QueryOptions(BaseModel):
@@ -13,6 +13,18 @@ class QueryOptions(BaseModel):
     read_only: bool = Field(
         default=True,
         description="If True, only SELECT queries allowed. The UI checkbox controls this.",
+    )
+    provider: str = Field(
+        default="ollama",
+        description="AI provider to use: ollama | openai | google | groq",
+    )
+    model: str = Field(
+        default="",
+        description="Model name override. Empty string uses the server default.",
+    )
+    api_key: str = Field(
+        default="",
+        description="API key for external providers (OpenAI, Google). Ignored for Ollama.",
     )
 
 
@@ -39,14 +51,15 @@ class NaturalLanguageQueryRequest(BaseModel):
         default=None, description="Pagination parameters for results"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "question": "Show me all users who signed up in the last 7 days",
                 "options": {"execute": True, "read_only": True},
                 "pagination": {"offset": 0, "limit": 50},
             }
         }
+    )
 
 
 class ExecutionResult(BaseModel):
@@ -85,8 +98,8 @@ class QueryResponse(BaseModel):
         default_factory=dict, description="Additional metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "success": True,
                 "question": "Show me all users who signed up in the last 7 days",
@@ -107,6 +120,7 @@ class QueryResponse(BaseModel):
                 },
             }
         }
+    )
 
 
 class DirectSQLRequest(BaseModel):
@@ -116,8 +130,9 @@ class DirectSQLRequest(BaseModel):
         ..., description="SQL query to execute", min_length=10, max_length=5000
     )
 
-    class Config:
-        json_schema_extra = {"example": {"sql": "SELECT * FROM users WHERE id = 123;"}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"sql": "SELECT * FROM users WHERE id = 123;"}}
+    )
 
 
 class ErrorResponse(BaseModel):

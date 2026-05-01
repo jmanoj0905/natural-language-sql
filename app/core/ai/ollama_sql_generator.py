@@ -3,14 +3,14 @@
 from typing import Tuple, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.ai.ollama_client import get_ollama_client
+from app.core.ai.ollama_client import generate_with_config
 from app.core.ai.prompts import (
     build_sql_generation_prompt,
     extract_sql_from_response,
     extract_explanation_from_response,
     build_explanation,
 )
-from app.core.ai.query_planner import get_intent_detector, QueryPlan
+from app.core.ai.query_planner import get_intent_detector
 from app.core.database.schema_inspector import SchemaInspector
 from app.core.database.connection_manager import get_db_manager
 from app.config import get_settings
@@ -25,7 +25,6 @@ class SQLGenerator:
 
     def __init__(self):
         self.settings = get_settings()
-        self.ai_client = get_ollama_client()
         self.schema_inspector = SchemaInspector()
         self.intent_detector = get_intent_detector()
 
@@ -36,6 +35,9 @@ class SQLGenerator:
         db_id: str = "default",
         read_only: bool = True,
         registered_dbs: Optional[list] = None,
+        provider: str = "ollama",
+        model: str = "",
+        api_key: str = "",
     ) -> Tuple[str, str]:
         """
         Generate SQL from natural language using Ollama.
@@ -46,6 +48,9 @@ class SQLGenerator:
             db_id: Database identifier
             read_only: Only used to hint the prompt (SELECT-only vs any SQL)
             registered_dbs: List of registered database IDs for intent detection
+            provider: AI provider to use for generation
+            model: Optional provider-specific model override
+            api_key: Optional API key for external providers
 
         Returns:
             Tuple of (sql, explanation)
@@ -98,13 +103,19 @@ class SQLGenerator:
             if self.settings.LOG_LEVEL.upper() == "DEBUG":
                 logger.debug("ollama_prompt_sent", prompt=prompt)
 
-            response = await self.ai_client.generate_content(prompt)
+            response = await generate_with_config(
+                prompt,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+            )
 
             log_ai_request(
                 logger,
                 question=question,
-                model=self.settings.OLLAMA_MODEL,
+                model=model or self.settings.OLLAMA_MODEL,
                 success=True,
+                provider=provider,
             )
 
             sql = extract_sql_from_response(response)
@@ -132,9 +143,10 @@ class SQLGenerator:
             log_ai_request(
                 logger,
                 question=question,
-                model=self.settings.OLLAMA_MODEL,
+                model=model or self.settings.OLLAMA_MODEL,
                 success=False,
                 error="Ollama API error",
+                provider=provider,
             )
             raise
 

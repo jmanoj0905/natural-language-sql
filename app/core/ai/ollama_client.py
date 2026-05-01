@@ -124,11 +124,12 @@ class OllamaClient:
 
         return content
 
-    async def generate_content(self, prompt: str) -> str:
+    async def generate_content(self, prompt: str, model_override: str | None = None) -> str:
         """
         Generate content using the configured inference provider.
 
         Routes to HuggingFace or Ollama based on INFERENCE_PROVIDER setting.
+        model_override: if provided, use this model name instead of the server default.
         """
         if self.settings.INFERENCE_PROVIDER == "huggingface":
             try:
@@ -138,12 +139,14 @@ class OllamaClient:
             except Exception as e:
                 raise AIAPIError(f"HuggingFace generation failed: {str(e)}")
 
+        model_name = model_override or self.settings.OLLAMA_MODEL
+
         async def _make_request():
             async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/generate",
                     json={
-                        "model": self.settings.OLLAMA_MODEL,
+                        "model": model_name,
                         "prompt": prompt,
                         "stream": False,
                         "options": {
@@ -261,3 +264,142 @@ def get_ollama_client() -> OllamaClient:
     if _ollama_client is None:
         _ollama_client = OllamaClient()
     return _ollama_client
+
+
+# ---------------------------------------------------------------------------
+# External provider helpers
+# ---------------------------------------------------------------------------
+
+def _strip_sql_seed(prompt: str) -> str:
+    """Remove trailing ```sql seed that some models don't handle in chat format."""
+    clean = prompt.rstrip()
+    if clean.endswith("```sql"):
+        clean = clean[: -len("```sql")].rstrip()
+    return clean
+
+
+async def _generate_openai(prompt: str, model: str, api_key: str) -> str:
+    """Generate SQL via OpenAI chat completions API."""
+    if not api_key:
+        raise AIAPIError("OpenAI API key is required. Set it in the model selector.")
+    clean_prompt = _strip_sql_seed(prompt)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": clean_prompt}],
+                "temperature": 0,
+                "max_tokens": 1024,
+            },
+        )
+    if response.status_code == 401:
+        raise AIAPIError("Invalid OpenAI API key.")
+    if response.status_code == 429:
+        raise AIAPIError("OpenAI rate limit reached. Wait a moment and try again.")
+    if response.status_code != 200:
+        raise AIAPIError(f"OpenAI API returned {response.status_code}: {response.text[:300]}")
+    content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    if not content:
+        raise AIAPIError("Empty response from OpenAI API")
+    logger.debug("openai_content_generated", model=model, response_length=len(content))
+    return content
+
+
+async def _generate_groq(prompt: str, model: str, api_key: str) -> str:
+    """Generate SQL via Groq API (OpenAI-compatible endpoint)."""
+    if not api_key:
+        raise AIAPIError("Groq API key is required. Set it in the model selector.")
+    clean_prompt = _strip_sql_seed(prompt)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": clean_prompt}],
+                "temperature": 0,
+                "max_tokens": 1024,
+            },
+        )
+    if response.status_code == 401:
+        raise AIAPIError("Invalid Groq API key.")
+    if response.status_code == 429:
+        raise AIAPIError("Groq rate limit reached. Wait a moment and try again.")
+    if response.status_code != 200:
+        raise AIAPIError(f"Groq API returned {response.status_code}: {response.text[:300]}")
+    content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    if not content:
+        raise AIAPIError("Empty response from Groq API")
+    logger.debug("groq_content_generated", model=model, response_length=len(content))
+    return content
+
+
+async def _generate_google(prompt: str, model: str, api_key: str) -> str:
+    """Generate SQL via Google Gemini generateContent API."""
+    if not api_key:
+        raise AIAPIError("Google API key is required. Set it in the model selector.")
+    clean_prompt = _strip_sql_seed(prompt)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": clean_prompt}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 1024},
+            },
+        )
+    if response.status_code == 400:
+        raise AIAPIError(f"Google API bad request: {response.text[:300]}")
+    if response.status_code == 403:
+        raise AIAPIError("Invalid Google API key or API not enabled.")
+    if response.status_code == 429:
+        raise AIAPIError("Google API rate limit reached. Wait a moment and try again.")
+    if response.status_code != 200:
+        raise AIAPIError(f"Google API returned {response.status_code}: {response.text[:300]}")
+    try:
+        content = (
+            response.json()
+            .get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
+    except (KeyError, IndexError):
+        content = ""
+    if not content:
+        raise AIAPIError("Empty response from Google Gemini API")
+    logger.debug("google_content_generated", model=model, response_length=len(content))
+    return content
+
+
+async def generate_with_config(
+    prompt: str, provider: str, model: str, api_key: str
+) -> str:
+    """
+    Route SQL generation to the correct provider.
+
+    Args:
+        prompt: The full prompt to send to the model.
+        provider: 'ollama' | 'openai' | 'google'
+        model: Model name (empty string = use server/provider default)
+        api_key: API key for external providers (ignored for ollama)
+    """
+    if provider == "openai":
+        return await _generate_openai(prompt, model or "gpt-4o-mini", api_key)
+    elif provider == "google":
+        return await _generate_google(prompt, model or "gemini-1.5-flash", api_key)
+    elif provider == "groq":
+        return await _generate_groq(prompt, model or "llama-3.3-70b-versatile", api_key)
+    else:
+        # Ollama (default) — pass model override if provided
+        client = get_ollama_client()
+        return await client.generate_content(prompt, model_override=model or None)

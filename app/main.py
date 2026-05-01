@@ -196,11 +196,6 @@ async def nlsql_exception_handler(request: Request, exc: NLSQLException):
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
 
-# WebSocket endpoint for tunnel (outside /api prefix)
-from app.api.v1.endpoints.tunnel import websocket_tunnel
-
-app.add_api_websocket_route("/ws/tunnel", websocket_tunnel)
-
 
 # Prometheus metrics endpoint
 @app.get("/metrics")

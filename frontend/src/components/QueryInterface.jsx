@@ -49,6 +49,7 @@ export default function QueryInterface({
   selectedDbIds = [],
   onDatabaseSelectionChange,
   aiMode = true,
+  modelConfig = { provider: 'ollama', model: '', apiKey: '' },
 }) {
   const { showError } = useToast()
   const [question, setQuestion] = useState('')
@@ -114,7 +115,16 @@ export default function QueryInterface({
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, options: { execute, read_only: false } }),
+        body: JSON.stringify({
+          question,
+          options: {
+            execute,
+            read_only: false,
+            provider: modelConfig.provider,
+            model: modelConfig.model,
+            api_key: modelConfig.apiKey,
+          },
+        }),
         signal: controller.signal,
       })
 
