@@ -110,14 +110,63 @@ docker-compose.override.yml
 
 # AI tool directories (agent skills, IDE integrations)
 .agents/
+.aider*/
+.amazonq/
+.bmad-core/
 .claude/
+.cline/
+.codeium/
+.continue/
+.copilot/
 .crush/
+.cursor/
+.cursor-tutor/
+.gemini/
 .goose/
 .openhands/
+.specstory/
+.superpowers/
+.tabnine/
 .vibe/
+.windsurf/
+.zed/
+superpowers/
 skills-lock.json
-CLAUDE.md
 
-# Generated docs / scratch files
+# AI tool dotfiles (root-level config)
+.aiderignore
+.aider.conf.yml
+.codeiumignore
+.cursorignore
+.cursorrules
+.gptignore
+.windsurfrules
+
+# AI / agent markdown files (instructions, memory, scratch)
+AGENT.md
+AGENTS.md
+CLAUDE.md
+CODEX.md
+COPILOT.md
+GEMINI.md
+MEMORY.md
+ULTRACLAUDE.md
+.claude.md
+.cursor.md
+
+# AI-generated planning / scratch docs
+docs/
+plan.md
+plans/
+specs/
+IMPLEMENTATION_*.md
+PHASE*_CONTEXT.md
 OPTIMIZATIONS_*.md
+ULTRA*.md
+*_PLAN.md
+*_SPEC.md
+*_DESIGN.md
+*_NOTES.md
+
+# Misc generated artifacts
 Architecture.jpg
