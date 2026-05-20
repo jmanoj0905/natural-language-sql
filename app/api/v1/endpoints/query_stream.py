@@ -177,8 +177,10 @@ async def natural_language_query_stream(
                     # --- Stage 2: Schema ---
                     yield sse_event("progress", {"stage": "schema", "status": "in_progress"})
                     t0 = time.perf_counter()
-                    schema_context = await schema_inspector.get_schema_summary(
-                        conn, db_id=target_db_id, max_tables=50, include_sample_data=True, sample_rows=3,
+                    schema_context = await schema_inspector.get_relevant_schema_summary(
+                        conn,
+                        question=request.question,
+                        db_id=target_db_id,
                     )
                     elapsed = round((time.perf_counter() - t0) * 1000)
                     table_count = schema_context.count("CREATE TABLE")
@@ -320,8 +322,10 @@ async def natural_language_query_stream(
 
             yield sse_event("progress", {"stage": "schema", "status": "in_progress"})
             t0 = time.perf_counter()
-            schema_context = await schema_inspector.get_schema_summary(
-                primary_conn, db_id=primary_id, max_tables=50, include_sample_data=True, sample_rows=3,
+            schema_context = await schema_inspector.get_relevant_schema_summary(
+                primary_conn,
+                question=request.question,
+                db_id=primary_id,
             )
             elapsed = round((time.perf_counter() - t0) * 1000)
             table_count = schema_context.count("CREATE TABLE")

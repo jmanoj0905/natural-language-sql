@@ -1,9 +1,8 @@
 """Query validation module."""
 
-import re
 import sqlparse
 from sqlparse.sql import Statement
-from sqlparse.tokens import Keyword
+from sqlparse.tokens import Keyword, Number
 
 from app.config import get_settings
 from app.exceptions import (
@@ -124,19 +123,24 @@ class QueryValidator:
         )
 
     def _enforce_limit(self, sql: str) -> str:
-        sql_upper = sql.upper()
+        parsed = sqlparse.parse(sql)
+        statement = parsed[0] if parsed else None
+        limit_idx = self._find_top_level_limit_index(statement) if statement else None
 
-        if "LIMIT" in sql_upper:
-            match = re.search(r"LIMIT\s+(\d+)", sql_upper)
-            if match:
-                existing_limit = int(match.group(1))
+        if limit_idx is not None:
+            value_idx = self._next_significant_token_index(statement, limit_idx + 1)
+            if value_idx is None:
+                return sql
+
+            limit_token = statement.tokens[value_idx]
+            if limit_token.ttype is Number.Integer:
+                existing_limit = int(limit_token.value)
                 if existing_limit > self.settings.MAX_QUERY_RESULTS:
-                    sql = re.sub(
-                        r"LIMIT\s+\d+",
-                        f"LIMIT {self.settings.MAX_QUERY_RESULTS}",
-                        sql,
-                        flags=re.IGNORECASE
-                    )
+                    limit_token.value = str(self.settings.MAX_QUERY_RESULTS)
+                    return str(statement)
+            elif limit_token.normalized == "ALL":
+                limit_token.value = str(self.settings.MAX_QUERY_RESULTS)
+                return str(statement)
             return sql
 
         default_limit = min(
@@ -146,3 +150,21 @@ class QueryValidator:
         if sql.endswith(";"):
             return f"{sql[:-1].rstrip()} LIMIT {default_limit};"
         return f"{sql} LIMIT {default_limit};"
+
+    def _find_top_level_limit_index(self, statement: Statement) -> int | None:
+        for idx, token in enumerate(statement.tokens):
+            if token.is_whitespace:
+                continue
+            if token.ttype is Keyword and token.normalized == "LIMIT":
+                return idx
+        return None
+
+    def _next_significant_token_index(
+        self,
+        statement: Statement,
+        start_index: int,
+    ) -> int | None:
+        for idx in range(start_index, len(statement.tokens)):
+            if not statement.tokens[idx].is_whitespace:
+                return idx
+        return None

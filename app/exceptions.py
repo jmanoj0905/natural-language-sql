@@ -107,6 +107,13 @@ class ResultLimitExceededError(QueryExecutionError):
 
 
 # AI API Exceptions (Ollama)
+class EmbedderUnavailableError(NLSQLException):
+    """sentence-transformers could not be imported or model load failed."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, code="EMBEDDER_UNAVAILABLE", details=details)
+
+
 class AIAPIError(NLSQLException):
     """Base exception for AI API errors."""
 

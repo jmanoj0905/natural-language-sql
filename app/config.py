@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     ENABLE_SCHEMA_CACHE: bool = True
     SCHEMA_CACHE_TTL_SECONDS: int = 3600  # 1 hour
 
+    # RAG / Hybrid retrieval
+    HYBRID_RETRIEVAL_ENABLED: bool = True
+    MAX_SEED_TABLES: int = 5
+    MAX_TABLES: int = 12
+    MAX_COLS_PER_TABLE: int = 15
+    COLUMN_SCORE_THRESHOLD: float = 0.25
+    RRF_K: int = 60
+    INCLUDE_SAMPLE_ROWS_COMPACT: bool = True
+    SAMPLE_ROWS_COMPACT: int = 1
+    EMBEDDING_INDEX_DIR: str = "~/.nlsql/embeddings"
+
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

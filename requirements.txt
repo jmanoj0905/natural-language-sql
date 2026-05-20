@@ -12,6 +12,10 @@ aiomysql>=0.2.0              # MySQL async driver
 # AI/LLM Integration
 httpx>=0.27.0  # For Ollama API calls (Local, FREE!)
 
+# RAG / Embedding
+sentence-transformers>=2.7
+numpy>=1.26
+
 # Security
 python-multipart>=0.0.12
 cryptography>=41.0.0             # Fernet encryption for database passwords

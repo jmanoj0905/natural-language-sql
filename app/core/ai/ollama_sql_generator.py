@@ -69,13 +69,11 @@ class SQLGenerator:
                 needs_decomposition=query_plan.needs_decomposition,
             )
 
-            # Get full schema context — all tables, all columns, sample data
-            schema_context = await self.schema_inspector.get_schema_summary(
+            # Retrieve a compact schema subgraph for the question.
+            schema_context = await self.schema_inspector.get_relevant_schema_summary(
                 connection,
+                question=question,
                 db_id=db_id,
-                max_tables=50,
-                include_sample_data=True,
-                sample_rows=3,
             )
 
             try:

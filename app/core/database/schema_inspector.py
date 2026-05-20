@@ -1,7 +1,10 @@
 """Schema introspection utility for PostgreSQL and MySQL databases."""
 
+import glob
+import os
 import re
 import hashlib
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -24,6 +27,30 @@ class SchemaInspector:
         self._caches: Dict[str, TTLCache] = {}
         self._cache_enabled = settings.ENABLE_SCHEMA_CACHE
         self._cache_ttl = settings.SCHEMA_CACHE_TTL_SECONDS
+
+        # Acquire embedder lazily; fall back to None if sentence-transformers not installed.
+        from app.core.database.retrieval.hybrid import HybridRetriever
+        from app.core.ai.schema_embedder import get_schema_embedder, EmbedderUnavailableError
+
+        embedder = None
+        if settings.HYBRID_RETRIEVAL_ENABLED:
+            try:
+                embedder = get_schema_embedder()
+            except EmbedderUnavailableError as e:
+                logger.warning("embedder_unavailable_falling_back_to_bm25", error=str(e))
+                embedder = None
+
+        self._hybrid = HybridRetriever(
+            embedder=embedder,
+            index_dir=Path(settings.EMBEDDING_INDEX_DIR).expanduser(),
+            max_seed_tables=settings.MAX_SEED_TABLES,
+            max_tables=settings.MAX_TABLES,
+            max_cols_per_table=settings.MAX_COLS_PER_TABLE,
+            col_score_threshold=settings.COLUMN_SCORE_THRESHOLD,
+            rrf_k=settings.RRF_K,
+            include_sample_rows=settings.INCLUDE_SAMPLE_ROWS_COMPACT,
+            hybrid_enabled=settings.HYBRID_RETRIEVAL_ENABLED,
+        )
 
     @staticmethod
     def _validate_identifier(name: str, identifier_type: str = "identifier") -> None:
@@ -75,7 +102,7 @@ class SchemaInspector:
     ) -> str:
         """
         Build a rich schema summary with CREATE TABLE statements,
-        foreign key relationships, and sample data.
+        foreign key relationships, and sample data using the formatter.
         """
         cache = self._get_cache(db_id)
         cache_key = f"schema_full_{sample_rows}"
@@ -84,72 +111,25 @@ class SchemaInspector:
             return cache[cache_key]
 
         try:
-            db_type, schema_name = self._get_db_info(db_id)
-
-            # Fetch tables + columns
+            db_type, _ = self._get_db_info(db_id)
             tables_info = await self._get_all_tables_info(connection, max_tables, db_id)
-
-            # Fetch foreign keys
             foreign_keys = await self._get_foreign_keys(connection, db_id)
 
-            # Build FK lookup: table_name -> list of FK dicts
-            fk_by_table: Dict[str, List[Dict]] = {}
-            for fk in foreign_keys:
-                fk_by_table.setdefault(fk["table"], []).append(fk)
+            samples = None
+            if include_sample_data:
+                samples = {}
+                for table in tables_info:
+                    rows = await self._get_sample_rows(connection, table["name"], sample_rows, db_type)
+                    if rows:
+                        samples[table["name"]] = rows
 
-            lines = []
-
-            # Quick-reference table list at the very top
-            table_names = [t["name"] for t in tables_info]
-            lines.append("-- AVAILABLE TABLES (use only these exact names, do not guess):")
-            lines.append("--   " + ", ".join(table_names))
-            lines.append("")
-
-            for table in tables_info:
-                table_name = table["name"]
-                columns = table["columns"]
-
-                # CREATE TABLE block
-                lines.append(f"CREATE TABLE {table_name} (")
-                col_lines = []
-                for col in columns:
-                    parts = [f"  {col['name']} {col['type']}"]
-                    if not col.get("nullable", True):
-                        parts.append("NOT NULL")
-                    if col.get("default"):
-                        parts.append(f"DEFAULT {col['default']}")
-                    col_lines.append(" ".join(parts))
-
-                # Add FK constraints inline
-                table_fks = fk_by_table.get(table_name, [])
-                for fk in table_fks:
-                    col_lines.append(
-                        f"  FOREIGN KEY ({fk['column']}) REFERENCES {fk['ref_table']}({fk['ref_column']})"
-                    )
-
-                lines.append(",\n".join(col_lines))
-                lines.append(");")
-
-                # Sample data
-                if include_sample_data:
-                    sample_data = await self._get_sample_rows(connection, table_name, sample_rows, db_type)
-                    if sample_data:
-                        lines.append(f"-- Sample rows from {table_name}:")
-                        for i, row in enumerate(sample_data, 1):
-                            row_str = ", ".join(f"{k}={repr(v)}" for k, v in row.items())
-                            lines.append(f"--   {row_str}")
-
-                lines.append("")  # blank line between tables
-
-            # Plain-English relationship summary at the end
-            if foreign_keys:
-                lines.append("-- RELATIONSHIPS (use these for JOINs):")
-                for fk in foreign_keys:
-                    lines.append(
-                        f"--   {fk['table']}.{fk['column']} → {fk['ref_table']}.{fk['ref_column']}"
-                    )
-
-            summary = "\n".join(lines)
+            from app.core.database.retrieval.formatter import format_schema_context
+            summary = format_schema_context(
+                selected_tables=tables_info,
+                foreign_keys=foreign_keys,
+                sample_rows_by_table=samples,
+                fallback_used=False,
+            )
 
             if cache is not None:
                 cache[cache_key] = summary
@@ -159,6 +139,60 @@ class SchemaInspector:
         except Exception as e:
             logger.error("schema_introspection_failed", database_id=db_id, error=str(e))
             raise SchemaIntrospectionError(f"Failed to introspect schema: {str(e)}")
+
+    async def get_relevant_schema_summary(
+        self,
+        connection: AsyncConnection,
+        question: str,
+        db_id: str = "default",
+        max_tables: int = 12,
+        progress=None,
+    ) -> str:
+        """
+        Build a compact schema summary via the HybridRetriever pipeline
+        (BM25 → vector → RRF fuse → FK expand → column prune → sample rows).
+        """
+        cache = self._get_cache(db_id)
+        question_hash = hashlib.md5(question.strip().lower().encode()).hexdigest()[:12]
+        cache_key = f"schema_relevant_{max_tables}_{question_hash}"
+
+        if cache is not None and cache_key in cache:
+            return cache[cache_key]
+
+        try:
+            db_type, _ = self._get_db_info(db_id)
+            tables_info = await self._get_all_tables_info(connection, 50, db_id)
+            foreign_keys = await self._get_foreign_keys(connection, db_id)
+            schema_hash = await self.get_schema_version(connection, db_id)
+
+            async def fetch_sample(table_name: str) -> list[dict]:
+                return await self._get_sample_rows(
+                    connection, table_name, get_settings().SAMPLE_ROWS_COMPACT, db_type
+                )
+
+            summary = await self._hybrid.build_context(
+                question=question,
+                db_id=db_id,
+                schema_hash=schema_hash,
+                tables_info=tables_info,
+                foreign_keys=foreign_keys,
+                sample_row_fetcher=fetch_sample,
+                progress=progress,
+            )
+
+            if cache is not None:
+                cache[cache_key] = summary
+
+            logger.info(
+                "schema_retrieval_complete",
+                db_id=db_id,
+                selected_table_count=summary.count("CREATE TABLE"),
+            )
+            return summary
+
+        except Exception as e:
+            logger.error("schema_retrieval_failed", database_id=db_id, error=str(e))
+            raise SchemaIntrospectionError(f"Failed to retrieve schema context: {str(e)}")
 
     async def _get_foreign_keys(
         self,
@@ -216,6 +250,42 @@ class SchemaInspector:
             logger.warning("foreign_key_fetch_failed", error=str(e))
             return []
 
+    async def _get_primary_keys(
+        self,
+        connection: AsyncConnection,
+        db_id: str = "default"
+    ) -> Dict[str, set]:
+        """Fetch primary key columns for each table, keyed by table name."""
+        db_type, schema_name = self._get_db_info(db_id)
+
+        if db_type == "mysql":
+            query = text("""
+                SELECT TABLE_NAME, COLUMN_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = :schema_name
+                  AND CONSTRAINT_NAME = 'PRIMARY'
+            """)
+        else:
+            query = text("""
+                SELECT tc.table_name, kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                  AND tc.table_schema = :schema_name
+            """)
+
+        try:
+            result = await connection.execute(query, {"schema_name": schema_name})
+            pks: Dict[str, set] = {}
+            for row in result.fetchall():
+                pks.setdefault(row[0], set()).add(row[1])
+            return pks
+        except Exception as e:
+            logger.warning("primary_key_fetch_failed", error=str(e))
+            return {}
+
     async def get_schema_for_database(
         self,
         connection: AsyncConnection,
@@ -259,6 +329,13 @@ class SchemaInspector:
         result = await connection.execute(query, {"schema_name": schema_name})
         rows = result.fetchall()
 
+        # Fetch PK and FK info to annotate columns
+        pks = await self._get_primary_keys(connection, db_id)
+        fks = await self._get_foreign_keys(connection, db_id)
+        fk_cols_per_table: Dict[str, set] = {}
+        for fk in fks:
+            fk_cols_per_table.setdefault(fk["table"], set()).add(fk["column"])
+
         tables_dict: Dict[str, List[Dict[str, Any]]] = {}
         for row in rows:
             table_name = row[0]
@@ -267,7 +344,9 @@ class SchemaInspector:
                 "type": row[2],
                 "nullable": row[3] == "YES",
                 "default": row[4],
-                "is_generated": bool(row[5]) and row[5] != "NEVER"
+                "is_generated": bool(row[5]) and row[5] != "NEVER",
+                "is_pk": row[1] in pks.get(table_name, set()),
+                "is_fk": row[1] in fk_cols_per_table.get(table_name, set()),
             }
             if table_name not in tables_dict:
                 tables_dict[table_name] = []
@@ -355,8 +434,19 @@ class SchemaInspector:
         return {"name": table_name, "columns": columns, "column_count": len(columns)}
 
     def clear_cache_for_database(self, db_id: str) -> None:
+        """Clear TTL cache entries and any on-disk vector index files for this db_id."""
         if db_id in self._caches:
             self._caches[db_id].clear()
+
+        # Delete vector index files for this db_id
+        settings = get_settings()
+        index_dir = Path(settings.EMBEDDING_INDEX_DIR).expanduser()
+        pattern = str(index_dir / f"{db_id}__*.npz")
+        for path in glob.glob(pattern):
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.warning("failed_to_delete_index", path=path, error=str(e))
 
     def clear_all_caches(self) -> None:
         for cache in self._caches.values():

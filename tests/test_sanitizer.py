@@ -20,6 +20,19 @@ class TestIsSafe:
         safe, _ = SQLSanitizer.is_safe("TRUNCATE TABLE users;")
         assert safe is False
 
+    def test_write_operation_blocked_by_default(self):
+        safe, violations = SQLSanitizer.is_safe("DELETE FROM users WHERE id = 1;")
+        assert safe is False
+        assert any("DML" in violation for violation in violations)
+
+    def test_write_operation_allowed_when_requested(self):
+        safe, violations = SQLSanitizer.is_safe(
+            "DELETE FROM users WHERE id = 1;",
+            allow_write=True,
+        )
+        assert safe is True
+        assert violations == []
+
     def test_exec_blocked(self):
         safe, _ = SQLSanitizer.is_safe("EXEC xp_cmdshell('dir');")
         assert safe is False
@@ -54,16 +67,28 @@ class TestIsSafe:
         safe, _ = SQLSanitizer.is_safe("SELECT * FROM users -- comment", strict_mode=True)
         assert safe is False
 
+    def test_multiline_comments_blocked_in_strict_mode(self):
+        safe, _ = SQLSanitizer.is_safe("SELECT /* block\ncomment */ 1", strict_mode=True)
+        assert safe is False
+
     def test_hex_allowed_in_lenient_mode(self):
         safe, _ = SQLSanitizer.is_safe("SELECT * FROM users WHERE id = 0xFF")
         assert safe is True
 
-    def test_hex_not_blocked_due_to_upper_normalization(self):
-        # Known gap: is_safe() uppercases SQL before matching, which turns
-        # 0xff into 0XFF. The hex regex requires lowercase '0x', so hex
-        # literals slip through even in strict mode.
+    def test_hex_blocked_in_strict_mode(self):
         safe, _ = SQLSanitizer.is_safe("SELECT * FROM users WHERE id = 0xFF", strict_mode=True)
-        assert safe is True  # bug: hex evades detection after .upper()
+        assert safe is False
+
+    def test_lowercase_hex_blocked_in_strict_mode(self):
+        safe, _ = SQLSanitizer.is_safe("SELECT * FROM users WHERE id = 0xff", strict_mode=True)
+        assert safe is False
+
+    def test_unicode_escape_blocked_in_strict_mode(self):
+        safe, _ = SQLSanitizer.is_safe(
+            r"SELECT * FROM users WHERE name = '\u0061'",
+            strict_mode=True,
+        )
+        assert safe is False
 
 
 class TestValidateAndRaise:

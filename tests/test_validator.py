@@ -34,7 +34,10 @@ class TestValidateBasic:
             validator.validate("SELECT 1; SELECT 2;")
 
     def test_write_then_select_allowed(self, validator):
-        sql = "UPDATE products SET price = price * 1.1 WHERE category = 'A'; SELECT * FROM products;"
+        sql = (
+            "UPDATE products SET price = price * 1.1 WHERE category = 'A'; "
+            "SELECT * FROM products;"
+        )
         result = validator.validate(sql)
         assert "UPDATE" in result and "SELECT" in result
 
@@ -88,6 +91,20 @@ class TestLimitEnforcement:
     def test_limit_at_max_is_kept(self, validator):
         result = validator.validate("SELECT * FROM users LIMIT 1000;")
         assert "LIMIT 1000" in result
+
+    def test_limit_in_string_literal_does_not_skip_default_limit(self, validator):
+        result = validator.validate("SELECT * FROM users WHERE note = 'LIMIT'")
+        assert result == "SELECT * FROM users WHERE note = 'LIMIT' LIMIT 100;"
+
+    def test_subquery_limit_does_not_skip_outer_default_limit(self, validator):
+        result = validator.validate(
+            "SELECT * FROM (SELECT * FROM users LIMIT 5) AS recent"
+        )
+        assert result.endswith("LIMIT 100;")
+
+    def test_limit_all_is_capped(self, validator):
+        result = validator.validate("SELECT * FROM users LIMIT ALL;")
+        assert result == "SELECT * FROM users LIMIT 1000;"
 
 
 class TestStrictValidation:
