@@ -1,0 +1,73 @@
+{
+  "summary": {
+    "model": "mannix/defog-llama3-sqlcoder-8b",
+    "mode": "rag",
+    "total": 5,
+    "accuracy": 1.0,
+    "p50_latency_s": 7.887,
+    "p95_latency_s": 9.809,
+    "counts": {
+      "correct": 5,
+      "gen_fail": 0,
+      "exec_fail": 0,
+      "mismatch": 0,
+      "gold_fail": 0
+    },
+    "rag_p50_latency_s": 1.222,
+    "rag_p95_latency_s": 17.649,
+    "rag_bm25_only": false,
+    "rag_sample_rows": 1
+  },
+  "records": [
+    {
+      "idx": 0,
+      "db_id": "concert_singer",
+      "question": "How many singers do we have?",
+      "gold": "SELECT count(*) FROM singer",
+      "pred": "SELECT COUNT(DISTINCT s.Singer_ID) AS number_of_singers FROM singer s",
+      "latency_s": 9.809,
+      "rag_latency_s": 17.649,
+      "status": "correct"
+    },
+    {
+      "idx": 1,
+      "db_id": "concert_singer",
+      "question": "What is the total number of singers?",
+      "gold": "SELECT count(*) FROM singer",
+      "pred": "SELECT COUNT(DISTINCT s.Singer_ID) AS total_singers FROM singer s",
+      "latency_s": 7.144,
+      "rag_latency_s": 1.545,
+      "status": "correct"
+    },
+    {
+      "idx": 2,
+      "db_id": "concert_singer",
+      "question": "Show name, country, age for all singers ordered by age from the oldest to the youngest.",
+      "gold": "SELECT name ,  country ,  age FROM singer ORDER BY age DESC",
+      "pred": "SELECT s.Name, s.Country, s.Age FROM singer s ORDER BY s.Age DESC",
+      "latency_s": 7.58,
+      "rag_latency_s": 1.222,
+      "status": "correct"
+    },
+    {
+      "idx": 3,
+      "db_id": "concert_singer",
+      "question": "What are the names, countries, and ages for every singer in descending order of age?",
+      "gold": "SELECT name ,  country ,  age FROM singer ORDER BY age DESC",
+      "pred": "SELECT s.Name, s.Country, s.Age FROM singer s ORDER BY s.Age DESC",
+      "latency_s": 7.887,
+      "rag_latency_s": 0.889,
+      "status": "correct"
+    },
+    {
+      "idx": 4,
+      "db_id": "concert_singer",
+      "question": "What is the average, minimum, and maximum age of all singers from France?",
+      "gold": "SELECT avg(age) ,  min(age) ,  max(age) FROM singer WHERE country  =  'France'",
+      "pred": "SELECT AVG(s.Age) AS average_age, MIN(s.Age) AS minimum_age, MAX(s.Age) AS maximum_age FROM singer s WHERE LOWER(s.Country) = 'france'",
+      "latency_s": 9.44,
+      "rag_latency_s": 0.438,
+      "status": "correct"
+    }
+  ]
+}
