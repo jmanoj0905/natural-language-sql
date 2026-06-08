@@ -1,0 +1,72 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nlsql-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: nlsql-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mannix/defog-llama3-sqlcoder-8b}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'ollama pull "$$OLLAMA_MODEL"'
+    restart: "no"
+
+  backend:
+    image: ghcr.io/jmanoj0905/nlsql-backend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nlsql-backend
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mannix/defog-llama3-sqlcoder-8b}
+      OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.1}
+      MAX_QUERY_RESULTS: ${MAX_QUERY_RESULTS:-1000}
+      DEFAULT_QUERY_LIMIT: ${DEFAULT_QUERY_LIMIT:-100}
+      QUERY_TIMEOUT_SECONDS: ${QUERY_TIMEOUT_SECONDS:-30}
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:-}
+      STRICT_SQL_VALIDATION: ${STRICT_SQL_VALIDATION:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost"]}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    volumes:
+      - nlsql_data:/home/app/.nlsql
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: ghcr.io/jmanoj0905/nlsql-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nlsql-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  ollama_models:
+  nlsql_data:

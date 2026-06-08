@@ -39,6 +39,11 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 
 ## Prerequisites
 
+**Docker path (recommended):**
+- **Docker** 20.10+ with Compose v2 — [docker.com](https://www.docker.com/get-started)
+- ~10 GB free disk (model + images)
+
+**Local path:**
 - **Python 3.12+**
 - **Node.js 18+**
 - **Ollama CLI** — [ollama.com](https://ollama.com)
@@ -46,6 +51,41 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 ---
 
 ## Quick Start
+
+### Docker (recommended)
+
+Prebuilt multi-arch images on GHCR. No Python/Node/Ollama install needed — just Docker.
+
+```bash
+# 1. Grab the compose file
+curl -O https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/docker-compose.yml
+
+# 2. Pull + start (first run downloads ~5GB Ollama model into a volume)
+docker compose up -d
+
+# 3. Tail logs while the model pulls
+docker compose logs -f ollama-pull
+```
+
+Open **http://localhost:3000**. First model pull is the slow part; subsequent starts are instant.
+
+**Connecting to a database on the host machine:** use `host.docker.internal` as the hostname (not `localhost`), since `localhost` inside the container points at the container itself.
+
+**Override the model:**
+```bash
+OLLAMA_MODEL=sqlcoder docker compose up -d
+```
+
+**Persistent encryption key** (so saved DB configs survive a `docker compose down`):
+```bash
+echo "DB_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
+```
+
+Images:
+- `ghcr.io/jmanoj0905/nlsql-backend:latest` (also `:0.1.0`)
+- `ghcr.io/jmanoj0905/nlsql-frontend:latest` (also `:0.1.0`)
+
+### Local (no Docker)
 
 ```bash
 # 1. Clone
@@ -143,6 +183,17 @@ Configuration lives in `.env` under `HYBRID_RETRIEVAL_ENABLED`, `MAX_SEED_TABLES
 
 ## Management Commands
 
+**Docker:**
+```bash
+docker compose up -d              # Start everything
+docker compose down               # Stop (keeps volumes)
+docker compose down -v            # Stop + wipe model cache and saved DB configs
+docker compose logs -f backend    # Tail backend logs
+docker compose pull               # Update to latest published images
+docker compose up -d --build      # Rebuild images locally from source
+```
+
+**Local:**
 ```bash
 ./run.sh dev           # Start backend + frontend + Ollama
 ./run.sh stop          # Stop all services
@@ -258,79 +309,6 @@ curl -X POST http://localhost:8000/api/v1/schema/cache/clear
 ```
 
 Full endpoint table lives in `PROJECT_BLUEPRINT.html` §8.
-
----
-
-## Project Structure
-
-```
-natural-lang-sql/
-├── app/                                  # FastAPI backend
-│   ├── main.py                           # Entry point, lifespan, CORS, metrics
-│   ├── config.py                         # Pydantic Settings (env vars)
-│   ├── dependencies.py                   # DI singletons
-│   ├── exceptions.py                     # Exception hierarchy
-│   ├── api/v1/endpoints/
-│   │   ├── query.py                      # /query/natural, /query/sql, /query/explain
-│   │   ├── query_stream.py               # /query/natural/stream (SSE, multi-DB)
-│   │   ├── query_management.py           # write preview / execute, history
-│   │   ├── schema.py                     # /schema endpoints
-│   │   ├── database.py                   # /databases CRUD
-│   │   └── health.py                     # /health endpoints
-│   └── core/
-│       ├── ai/
-│       │   ├── ollama_client.py          # Provider routing (Ollama/OpenAI/Gemini/Groq/HF)
-│       │   ├── ollama_sql_generator.py   # NL → SQL orchestrator
-│       │   ├── prompts.py                # Prompt templates + SQL/explanation extractors
-│       │   ├── query_planner.py          # Intent detector + step decomposition
-│       │   └── schema_embedder.py        # sentence-transformers wrapper (lazy)
-│       ├── database/
-│       │   ├── connection_manager.py     # Async engine pool, Fernet-encrypted creds
-│       │   ├── schema_inspector.py       # information_schema introspection + TTL cache
-│       │   ├── adapters/                 # PostgreSQL + MySQL adapters
-│       │   └── retrieval/                # Hybrid RAG pipeline
-│       │       ├── hybrid.py             # Orchestrator
-│       │       ├── corpus.py             # Doc builder (tables/cols/paths)
-│       │       ├── bm25.py               # Lexical ranker
-│       │       ├── vector_index.py       # NumPy cosine index + .npz persistence
-│       │       ├── rrf.py                # Reciprocal Rank Fusion
-│       │       ├── fk_expander.py        # 1-hop FK graph walk
-│       │       ├── column_pruner.py      # Per-table column pruning by cosine
-│       │       ├── formatter.py          # Render CREATE TABLE + samples + relationships
-│       │       └── progress.py           # Sub-stage progress events
-│       ├── query/
-│       │   ├── validator.py              # sqlparse, operation allow-list, auto-LIMIT
-│       │   ├── executor.py               # asyncio.wait_for execution + pagination
-│       │   └── error_humanizer.py        # DB errors → English
-│       └── security/
-│           └── sql_sanitizer.py          # Injection pattern guard (lenient / strict)
-├── frontend/                             # React 18 + Vite SPA
-│   └── src/
-│       ├── App.jsx                       # Layout shell, top nav, sidebar, tabs
-│       ├── config.js                     # API_BASE
-│       ├── components/
-│       │   ├── AppSidebar.jsx            # DB list, multi-select, add/edit/delete
-│       │   ├── ConnectionForm.jsx        # Flat connection form with Test/Save
-│       │   ├── QueryInterface.jsx        # NL input, SSE reader, editable SQL preview
-│       │   ├── QueryProgress.jsx         # 5-stage live indicator
-│       │   ├── MultiStepPlan.jsx         # Compound-question decomposition
-│       │   ├── ResultsDisplay.jsx        # Sortable, paginated table
-│       │   ├── ExportModal.jsx           # CSV / JSON / TSV export
-│       │   ├── SchemaModal.jsx           # Full schema browser
-│       │   ├── QueryHistory.jsx          # Session history
-│       │   ├── SettingsModal.jsx         # Provider / model / API key
-│       │   ├── DatabaseStatus.jsx        # Header status pill
-│       │   └── ui/                       # Radix-based primitives
-│       ├── data/providers.js             # Per-db_type defaults
-│       └── utils/{sql,queryErrors}.js    # Write-op detection, error parsing
-├── tests/                                # pytest suite (sanitiser, validator, RAG units…)
-├── docs/                                 # Design specs
-├── scripts/                              # Seed scripts, password-encrypt migration
-├── PROJECT_BLUEPRINT.html                # Full architecture + rebuild blueprint
-├── requirements.txt
-├── install.sh                            # One-command setup
-└── run.sh                                # dev / prod / stop / clean / logs
-```
 
 ---
 
