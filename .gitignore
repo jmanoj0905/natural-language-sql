@@ -170,3 +170,9 @@ ULTRA*.md
 
 # Misc generated artifacts
 Architecture.jpg
+
+# Understand-anything tooling artifacts
+.understand-anything/
+
+# Spider benchmark dataset (download separately, see benchmarks/README.md)
+benchmarks/spider_data/

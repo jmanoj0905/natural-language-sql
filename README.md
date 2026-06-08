@@ -16,6 +16,8 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 **Stack:** FastAPI + async SQLAlchemy · React 18 + Vite + Tailwind · Ollama / OpenAI / Gemini / Groq routing · BM25 + sentence-transformers hybrid retrieval
 
 > Looking for the deep-dive blueprint (architecture, pipeline internals, file-to-responsibility map)? See [`PROJECT_BLUEPRINT.html`](./PROJECT_BLUEPRINT.html).
+>
+> Benchmark results (Spider dev, 52.32 % execution accuracy): [`BENCHMARKS.md`](./BENCHMARKS.md).
 
 ---
 
