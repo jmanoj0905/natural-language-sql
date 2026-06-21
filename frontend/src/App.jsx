@@ -18,7 +18,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('query')
   const [aiMode, setAiMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [modelConfig, setModelConfig] = useState({ provider: 'ollama', model: '', apiKey: '' })
+  const [modelConfig, setModelConfig] = useState({ provider: 'ollama', model: '', apiKey: '', ollamaUrl: '' })
 
   useEffect(() => {
     document.body.classList.add('cursor-active')
@@ -92,6 +92,15 @@ function App() {
     loadDatabases()
     const interval = setInterval(loadDatabases, 30000)
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/settings`)
+      .then(res => {
+        const { provider, model, ollama_url } = res.data
+        setModelConfig({ provider, model, apiKey: '', ollamaUrl: ollama_url || '' })
+      })
+      .catch(err => console.error('Failed to load settings:', err))
   }, [])
 
   const loadDatabases = async () => {

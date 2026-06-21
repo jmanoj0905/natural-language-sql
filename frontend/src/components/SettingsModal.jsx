@@ -70,6 +70,7 @@ export default function SettingsModal({
   const [ollamaLoading, setOllamaLoading] = useState(false)
   const [ollamaError, setOllamaError] = useState(null)
   const [ollamaModel, setOllamaModel] = useState(modelConfig.provider === 'ollama' ? modelConfig.model : '')
+  const [ollamaUrl, setOllamaUrl] = useState(modelConfig.ollamaUrl || '')
 
   const fetchOllamaModels = () => {
     setOllamaLoading(true)
@@ -88,10 +89,24 @@ export default function SettingsModal({
     if (mode === 'local') fetchOllamaModels()
   }, [mode])
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (mode === 'local') {
-      onModelConfigChange({ provider: 'ollama', model: ollamaModel, apiKey: '' })
-      showSuccess('Using local Ollama' + (ollamaModel ? ` · ${ollamaModel}` : ''))
+      try {
+        const res = await axios.post(`${API_BASE}/settings`, {
+          provider: 'ollama',
+          model: ollamaModel,
+          ollama_url: ollamaUrl,
+        })
+        onModelConfigChange({
+          provider: res.data.provider,
+          model: res.data.model,
+          apiKey: '',
+          ollamaUrl: res.data.ollama_url || '',
+        })
+        showSuccess('Using local Ollama' + (res.data.model ? ` · ${res.data.model}` : ''))
+      } catch (err) {
+        showError(err.response?.data?.detail?.message || err.message || 'Failed to save settings')
+      }
     } else {
       const meta = CLOUD_PROVIDERS.find(p => p.id === cloudProvider)
       if (!cloudKey.trim()) {
@@ -102,8 +117,23 @@ export default function SettingsModal({
         showError('Please select a model')
         return
       }
-      onModelConfigChange({ provider: cloudProvider, model: cloudModel, apiKey: cloudKey.trim() })
-      showSuccess(`Using ${meta?.label} · ${cloudModel}`)
+      try {
+        const res = await axios.post(`${API_BASE}/settings`, {
+          provider: cloudProvider,
+          model: cloudModel,
+          ollama_url: '',
+          api_key: cloudKey.trim(),
+        })
+        onModelConfigChange({
+          provider: res.data.provider,
+          model: res.data.model,
+          apiKey: '',
+          ollamaUrl: res.data.ollama_url || '',
+        })
+        showSuccess(`Using ${meta?.label} · ${res.data.model}`)
+      } catch (err) {
+        showError(err.response?.data?.detail?.message || err.message || 'Failed to save settings')
+      }
     }
   }
 
@@ -227,6 +257,18 @@ export default function SettingsModal({
                     placeholder="e.g. llama3.2, mistral, codellama"
                     className="w-full px-3 py-2 brutalist-border rounded-xl font-mono text-xs bg-white focus:outline-none focus:ring-2 focus:ring-foreground/20"
                   />
+                </div>
+
+                <div className="space-y-1.5 pt-1 border-t-2 border-border">
+                  <label className="font-label text-xs text-foreground/50 uppercase tracking-wide">Ollama URL (optional)</label>
+                  <input
+                    type="text"
+                    value={ollamaUrl}
+                    onChange={e => setOllamaUrl(e.target.value)}
+                    placeholder="http://localhost:11434"
+                    className="w-full px-3 py-2 brutalist-border rounded-xl font-mono text-xs bg-white focus:outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                  <p className="font-label text-[11px] text-foreground/40">Point at host Ollama with <code className="font-mono">http://host.docker.internal:11434</code></p>
                 </div>
               </div>
             )}
