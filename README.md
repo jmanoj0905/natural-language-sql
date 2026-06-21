@@ -346,7 +346,7 @@ Full endpoint table lives in `PROJECT_BLUEPRINT.html` §8.
 
 ## Security Notes
 
-- **Credentials** are Fernet-encrypted at rest in `~/.nlsql/databases.json`. **Generate a stable key and set `DB_ENCRYPTION_KEY` in `.env`** — otherwise a fresh key is generated on each restart, making saved passwords unrecoverable.
+- **Credentials** are Fernet-encrypted at rest in `~/.nlsql/databases.json`. When `DB_ENCRYPTION_KEY` is blank, a key is auto-generated and persisted to `~/.nlsql/.encryption_key` (in the `nlsql_data` volume), so saved passwords survive restarts. **Set `DB_ENCRYPTION_KEY` explicitly in `.env`** to override with an operator-managed key.
 - **SQL execution** is limited to single SELECT / INSERT / UPDATE / DELETE statements, with one supported compound shape: write statement followed by SELECT.
 - **SELECT queries** get a default `LIMIT` when missing; oversized explicit `LIMIT` values are capped at `MAX_QUERY_RESULTS`.
 - **Strict validation** (`STRICT_SQL_VALIDATION=true`) blocks comments, hex literals, and other suspicious SQL patterns.

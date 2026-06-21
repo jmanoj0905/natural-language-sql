@@ -29,7 +29,7 @@ You can switch back to Local/Ollama at any time from the Settings panel to stop 
 
 - Passwords and API keys are **never logged** — they are redacted in all structured log output.
 - Passwords and API keys are **never returned in API responses** — the API returns masked values (e.g., `********`) rather than the actual secrets.
-- The encryption key itself is auto-generated on first launch and persisted in `~/.nlsql/.key`. To survive a full container wipe, back this file up, or set `DB_ENCRYPTION_KEY` explicitly in `.env`.
+- The encryption key itself is auto-generated on first launch and persisted in `~/.nlsql/.encryption_key`. To survive a full container wipe, back this file up, or set `DB_ENCRYPTION_KEY` explicitly in `.env`.
 
 The following configuration values are stored as **plaintext** (they are not sensitive secrets): provider name, model name, and Ollama URL.
 
