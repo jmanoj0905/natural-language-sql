@@ -6,6 +6,7 @@ import ResultsDisplay from './components/ResultsDisplay'
 import QueryHistory from './components/QueryHistory'
 import DatabaseStatus from './components/DatabaseStatus'
 import SettingsModal from './components/SettingsModal'
+import SetupGate from './components/SetupGate'
 import { useToast } from './hooks/useToast.jsx'
 import { API_BASE } from './config'
 
@@ -142,6 +143,7 @@ function App() {
     }`
 
   return (
+    <SetupGate provider={modelConfig.provider}>
     <div className="bg-background text-foreground min-h-screen">
       {/* Top Nav Bar */}
       <header className="flex justify-between items-center w-full px-6 h-16 sticky top-0 z-50 bg-white border-b-2 border-border">
@@ -230,6 +232,7 @@ function App() {
         />
       )}
     </div>
+    </SetupGate>
   )
 }
 
