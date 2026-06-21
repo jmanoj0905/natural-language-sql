@@ -258,9 +258,13 @@ class OllamaClient:
 _ollama_client: OllamaClient | None = None
 
 
-def get_ollama_client() -> OllamaClient:
-    """Get the global Ollama client instance."""
+def get_ollama_client(base_url: str | None = None) -> OllamaClient:
+    """Return the global Ollama client, or a transient one bound to base_url."""
     global _ollama_client
+    if base_url:
+        client = OllamaClient()
+        client.base_url = base_url
+        return client
     if _ollama_client is None:
         _ollama_client = OllamaClient()
     return _ollama_client
@@ -382,7 +386,7 @@ async def _generate_google(prompt: str, model: str, api_key: str) -> str:
 
 
 async def generate_with_config(
-    prompt: str, provider: str, model: str, api_key: str
+    prompt: str, provider: str, model: str, api_key: str, ollama_url: str = ""
 ) -> str:
     """
     Route SQL generation to the correct provider.
@@ -392,6 +396,7 @@ async def generate_with_config(
         provider: 'ollama' | 'openai' | 'google'
         model: Model name (empty string = use server/provider default)
         api_key: API key for external providers (ignored for ollama)
+        ollama_url: Custom Ollama base URL (only used for ollama provider)
     """
     if provider == "openai":
         return await _generate_openai(prompt, model or "gpt-4o-mini", api_key)
@@ -400,6 +405,6 @@ async def generate_with_config(
     elif provider == "groq":
         return await _generate_groq(prompt, model or "llama-3.3-70b-versatile", api_key)
     else:
-        # Ollama (default) — pass model override if provided
-        client = get_ollama_client()
+        # Ollama (default) — pass model override and base_url if provided
+        client = get_ollama_client(base_url=ollama_url or None)
         return await client.generate_content(prompt, model_override=model or None)
