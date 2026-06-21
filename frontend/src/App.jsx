@@ -214,7 +214,7 @@ function App() {
             )}
 
             <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
-              <div>ENGINE: {modelConfig.provider.toUpperCase()} | MODEL: {(modelConfig.model || 'AUTO').toUpperCase()}</div>
+              <div>ENGINE: {modelConfig.provider.toUpperCase()} | MODEL: {(modelConfig.model || 'AUTO').toUpperCase()} · {modelConfig.provider === 'ollama' ? 'LOCAL' : 'CLOUD↗'}</div>
               <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
             </footer>
           </div>

@@ -201,6 +201,19 @@ export default function SettingsModal({
               ))}
             </div>
 
+            {/* Privacy egress banner */}
+            {mode === 'local' ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-success/20 brutalist-border rounded-xl text-xs text-foreground/70">
+                <span className="material-symbols-outlined text-sm shrink-0">lock</span>
+                <span>🔒 Local — nothing leaves this machine.</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-2 bg-warning/20 brutalist-border rounded-xl text-xs text-foreground/70">
+                <span className="material-symbols-outlined text-sm shrink-0">warning</span>
+                <span>⚠ Cloud — your database schema + question are sent to {selectedCloudMeta?.label || cloudProvider}.</span>
+              </div>
+            )}
+
             {/* Local — Ollama */}
             {mode === 'local' && (
               <div className="space-y-3">
