@@ -93,6 +93,8 @@ async def run(
     rag_bm25_only: bool,
     rag_no_samples: bool,
     rag_sample_rows: int,
+    self_correct: bool = False,
+    self_correct_retries: int = 2,
 ) -> None:
     dev = json.loads((SPIDER_DIR / "dev.json").read_text())
     tables = load_tables(SPIDER_DIR / "tables.json")
@@ -111,6 +113,7 @@ async def run(
     schema_cache: dict[str, str] = {}
     records, latencies, rag_latencies = [], [], []
     counts = {"correct": 0, "gen_fail": 0, "exec_fail": 0, "mismatch": 0, "gold_fail": 0}
+    sc_recovered = 0
 
     for i, ex in enumerate(dev):
         db_id = ex["db_id"]
@@ -180,15 +183,55 @@ async def run(
             print(f"[{i+1}/{len(dev)}] {db_id} GOLD_FAIL ({latency:.2f}s)")
             continue
 
-        # ---- Execute pred ----
-        try:
-            pred_rows = execute(db_path, pred_sql)
-        except Exception as e:
-            counts["exec_fail"] += 1
-            rec |= {"status": "exec_fail", "error": str(e)[:300]}
-            records.append(rec)
-            print(f"[{i+1}/{len(dev)}] {db_id} EXEC_FAIL ({latency:.2f}s)")
-            continue
+        # ---- Execute pred (with optional self-correction) ----
+        if self_correct:
+            from app.core.query.self_correction import run_self_correction
+
+            async def _generate(prompt):
+                return await generate_with_config(prompt, provider="ollama", model=resolved_model, api_key="")
+
+            async def _execute(candidate_sql):
+                # execute() is sync stdlib sqlite3 (fresh connection per call),
+                # so there is no aborted-transaction problem — no savepoint needed.
+                return await asyncio.to_thread(execute, db_path, candidate_sql)
+
+            async def _schema_for_attempt(n):
+                # Retry 2 widens to the full schema dump for this db.
+                if n >= 2:
+                    return build_schema_context(tables[db_id])
+                return schema_ctx
+
+            outcome = await run_self_correction(
+                question=question,
+                schema_context=schema_ctx,
+                database_type="SQLite",
+                read_only=True,
+                initial_sql=pred_sql,
+                generate=_generate,
+                execute=_execute,
+                schema_for_attempt=_schema_for_attempt,
+                max_retries=self_correct_retries,
+            )
+            if not outcome.succeeded:
+                counts["exec_fail"] += 1
+                rec |= {"status": "exec_fail", "error": (outcome.error or "")[:300], "sc_retries": outcome.retries}
+                records.append(rec)
+                print(f"[{i+1}/{len(dev)}] {db_id} EXEC_FAIL ({latency:.2f}s)")
+                continue
+            pred_sql = outcome.sql
+            pred_rows = outcome.result
+            rec["sc_retries"] = outcome.retries
+            if outcome.retries > 0:
+                sc_recovered += 1
+        else:
+            try:
+                pred_rows = execute(db_path, pred_sql)
+            except Exception as e:
+                counts["exec_fail"] += 1
+                rec |= {"status": "exec_fail", "error": str(e)[:300]}
+                records.append(rec)
+                print(f"[{i+1}/{len(dev)}] {db_id} EXEC_FAIL ({latency:.2f}s)")
+                continue
 
         ok = results_match(gold_rows, pred_rows, order_matters=gold_has_order_by(gold_sql))
         if ok:
@@ -230,6 +273,11 @@ async def run(
         summary["rag_bm25_only"] = rag_bm25_only
         summary["rag_sample_rows"] = 0 if rag_no_samples else rag_sample_rows
 
+    if self_correct:
+        summary["self_correct"] = True
+        summary["self_correct_retries"] = self_correct_retries
+        summary["self_correct_recovered"] = sc_recovered
+
     print("\n=== Summary ===")
     print(json.dumps(summary, indent=2))
 
@@ -247,6 +295,8 @@ def main() -> None:
     p.add_argument("--rag-bm25-only", action="store_true", help="RAG without vector embeddings (BM25 + FK only)")
     p.add_argument("--rag-no-samples", action="store_true", help="Skip sample-row fetching in RAG context")
     p.add_argument("--rag-sample-rows", type=int, default=None, help="Sample rows per table (default = SAMPLE_ROWS_COMPACT)")
+    p.add_argument("--self-correct", action="store_true", help="Retry exec failures with the DB error fed back to the model")
+    p.add_argument("--self-correct-retries", type=int, default=2, help="Max correction retries")
     args = p.parse_args()
 
     if not (SPIDER_DIR / "dev.json").exists():
@@ -268,6 +318,8 @@ def main() -> None:
         args.rag_bm25_only,
         args.rag_no_samples,
         sample_rows,
+        args.self_correct,
+        args.self_correct_retries,
     ))
 
 
