@@ -213,6 +213,7 @@ async def natural_language_query_stream(
                         database_type=database_type,
                         read_only=request.options.read_only,
                         intent_context=intent_context,
+                        include_examples=settings.ENABLE_FEW_SHOT,
                     )
                     response_text = await generate_with_config(
                         prompt,
@@ -415,6 +416,7 @@ async def natural_language_query_stream(
                 database_type=database_type,
                 read_only=request.options.read_only,
                 intent_context=intent_context,
+                include_examples=settings.ENABLE_FEW_SHOT,
             )
             response_text = await generate_with_config(
                 prompt,

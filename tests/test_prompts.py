@@ -207,6 +207,24 @@ class TestBuildExplanation:
 
 
 # ---------------------------------------------------------------------------
+# TestFewShot
+# ---------------------------------------------------------------------------
+
+class TestFewShot:
+    def test_examples_absent_by_default(self, sample_schema):
+        prompt = build_sql_generation_prompt("q", sample_schema)
+        assert "### Examples" not in prompt
+
+    def test_examples_present_when_enabled(self, sample_schema):
+        prompt = build_sql_generation_prompt("q", sample_schema, include_examples=True)
+        assert "### Examples" in prompt
+        # examples must appear before the schema block
+        assert prompt.index("### Examples") < prompt.index("### Database Schema")
+        # still seeds the sql fence for extraction
+        assert prompt.rstrip().endswith("```sql")
+
+
+# ---------------------------------------------------------------------------
 # build_sql_correction_prompt
 # ---------------------------------------------------------------------------
 

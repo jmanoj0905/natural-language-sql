@@ -105,6 +105,7 @@ class SQLGenerator:
                 database_type=database_type,
                 read_only=read_only,
                 intent_context=intent_context,
+                include_examples=self.settings.ENABLE_FEW_SHOT,
             )
 
             if self.settings.LOG_LEVEL.upper() == "DEBUG":

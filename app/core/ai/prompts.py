@@ -5,12 +5,26 @@ import json
 from typing import Optional, List, Dict, Any
 
 
+_FEW_SHOT_EXAMPLES = """### Examples
+Example 1
+Question: How many employees are there?
+SQL: SELECT COUNT(*) FROM employees;
+
+Example 2
+Question: List each department name and its average salary, highest first.
+SQL: SELECT d.name, AVG(e.salary) AS avg_salary
+FROM employees e JOIN departments d ON e.dept_id = d.id
+GROUP BY d.name ORDER BY avg_salary DESC;
+"""
+
+
 def build_sql_generation_prompt(
     question: str,
     schema_context: str,
     database_type: str = "PostgreSQL",
     read_only: bool = False,
     intent_context: Optional[Dict[str, Any]] = None,
+    include_examples: bool = False,
 ) -> str:
     """
     Build a prompt for SQL generation using sqlcoder's expected format.
@@ -91,6 +105,8 @@ Separate multiple SQL statements with semicolons (;).
             f"{enforcement} {row_guidance}{context_guidance}"
         )
 
+    examples_block = f"\n{_FEW_SHOT_EXAMPLES}\n" if include_examples else ""
+
     return f"""### Task
 Generate a SQL query for the user's request.
 
@@ -101,7 +117,7 @@ The request may span multiple lines and may include pasted rows from earlier res
 ### Rules
 {constraint}
 Return SQL only. Do not include prose before the SQL.
-
+{examples_block}
 ### Database Schema
 The query will run on a database with the following schema:
 {schema_context}

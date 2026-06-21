@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     SELF_CORRECTION_ENABLED: bool = True
     SELF_CORRECTION_MAX_RETRIES: int = 2
 
+    # Few-shot exemplars in SQL generation prompt (default OFF)
+    ENABLE_FEW_SHOT: bool = False
+
     # Database Connection Defaults
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
