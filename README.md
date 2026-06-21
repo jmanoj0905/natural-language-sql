@@ -9,6 +9,33 @@
 
 ---
 
+## Download & Run
+
+**Requires:** [Docker](https://www.docker.com/get-started) 20.10+ with Compose v2 · ~10 GB free disk · no Python/Node/Ollama needed.
+
+**One-liner (macOS / Linux):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/quickstart.sh | sh
+```
+
+**Or manually:**
+
+```bash
+curl -O https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/docker-compose.yml
+docker compose up -d
+```
+
+Open **http://localhost:3000**.
+
+> **First run:** the Ollama model (~5 GB) downloads in the background. SQL generation becomes available once the download finishes. Watch progress with `docker compose logs -f ollama-pull`.
+
+To pick a cloud provider (OpenAI, Gemini, Groq) instead of the local model, open the **Settings** panel in the app after it starts.
+
+> Privacy: everything runs in local containers. With the default Local/Ollama provider, no data leaves your machine. See [PRIVACY.md](PRIVACY.md) for the full statement.
+
+---
+
 ## What it does
 
 Type a question like *"show me the top 10 customers by revenue last month"* — the engine retrieves only the relevant slice of your schema, asks a local SQL-tuned LLM to write the query, validates it, executes it, and streams the results back in real time. No SQL knowledge required.
@@ -57,6 +84,11 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 Prebuilt multi-arch images on GHCR. No Python/Node/Ollama install needed — just Docker.
 
 ```bash
+# Quickstart script (checks prerequisites, downloads compose file, starts stack)
+curl -fsSL https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/quickstart.sh | sh
+
+# — or manually —
+
 # 1. Grab the compose file
 curl -O https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/docker-compose.yml
 
