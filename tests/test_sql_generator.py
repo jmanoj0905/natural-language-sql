@@ -4,7 +4,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.ai.ollama_sql_generator import SQLGenerator
+from app.core.ai.ollama_sql_generator import SQLGenerator, SQLGenerationResult
 
 
 @pytest.mark.asyncio
@@ -31,3 +31,55 @@ async def test_generate_sql_uses_question_scoped_schema_retrieval():
         question="show purchase totals",
         db_id="sales",
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_schema_context(monkeypatch):
+    gen = SQLGenerator()
+
+    async def fake_schema(self, connection, question, db_id):
+        return "CREATE TABLE users (id INT);"
+
+    async def fake_generate(prompt, provider, model, api_key):
+        return "```sql\nSELECT * FROM users\n```"
+
+    monkeypatch.setattr(
+        "app.core.ai.ollama_sql_generator.SchemaInspector.get_relevant_schema_summary",
+        fake_schema,
+    )
+    monkeypatch.setattr(
+        "app.core.ai.ollama_sql_generator.generate_with_config", fake_generate
+    )
+
+    result = await gen.generate(
+        question="show users", connection=None, db_id="default", read_only=True
+    )
+    assert isinstance(result, SQLGenerationResult)
+    assert "SELECT * FROM users" in result.sql
+    assert "CREATE TABLE users" in result.schema_context
+    assert result.database_type in ("PostgreSQL", "MySQL")
+
+
+@pytest.mark.asyncio
+async def test_generate_sql_still_returns_tuple(monkeypatch):
+    gen = SQLGenerator()
+
+    async def fake_schema(self, connection, question, db_id):
+        return "CREATE TABLE users (id INT);"
+
+    async def fake_generate(prompt, provider, model, api_key):
+        return "```sql\nSELECT 1\n```"
+
+    monkeypatch.setattr(
+        "app.core.ai.ollama_sql_generator.SchemaInspector.get_relevant_schema_summary",
+        fake_schema,
+    )
+    monkeypatch.setattr(
+        "app.core.ai.ollama_sql_generator.generate_with_config", fake_generate
+    )
+
+    sql, explanation = await gen.generate_sql(
+        question="x", connection=None, db_id="default"
+    )
+    assert "SELECT 1" in sql
+    assert isinstance(explanation, str)

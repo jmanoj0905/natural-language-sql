@@ -1,7 +1,16 @@
 """SQL generation using Ollama (Local, FREE, No API keys!)"""
 
+from dataclasses import dataclass
 from typing import Tuple, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+@dataclass
+class SQLGenerationResult:
+    sql: str
+    explanation: str
+    schema_context: str
+    database_type: str
 
 from app.core.ai.ollama_client import generate_with_config
 from app.core.ai.prompts import (
@@ -28,7 +37,7 @@ class SQLGenerator:
         self.schema_inspector = SchemaInspector()
         self.intent_detector = get_intent_detector()
 
-    async def generate_sql(
+    async def generate(
         self,
         question: str,
         connection: AsyncConnection,
@@ -38,7 +47,7 @@ class SQLGenerator:
         provider: str = "ollama",
         model: str = "",
         api_key: str = "",
-    ) -> Tuple[str, str]:
+    ) -> SQLGenerationResult:
         """
         Generate SQL from natural language using Ollama.
 
@@ -53,7 +62,7 @@ class SQLGenerator:
             api_key: Optional API key for external providers
 
         Returns:
-            Tuple of (sql, explanation)
+            SQLGenerationResult with sql, explanation, schema_context, database_type
         """
         try:
             # Detect query intent for context-aware prompting
@@ -135,7 +144,12 @@ class SQLGenerator:
                 explanation=explanation[:100],
             )
 
-            return sql, explanation
+            return SQLGenerationResult(
+                sql=sql,
+                explanation=explanation,
+                schema_context=schema_context,
+                database_type=database_type,
+            )
 
         except AIAPIError:
             log_ai_request(
@@ -151,3 +165,27 @@ class SQLGenerator:
         except Exception as e:
             logger.error("sql_generation_failed", error=str(e), question=question[:100])
             raise AIAPIError(f"SQL generation failed: {str(e)}")
+
+    async def generate_sql(
+        self,
+        question: str,
+        connection: AsyncConnection,
+        db_id: str = "default",
+        read_only: bool = True,
+        registered_dbs: Optional[list] = None,
+        provider: str = "ollama",
+        model: str = "",
+        api_key: str = "",
+    ) -> Tuple[str, str]:
+        """Backward-compatible wrapper returning (sql, explanation)."""
+        result = await self.generate(
+            question=question,
+            connection=connection,
+            db_id=db_id,
+            read_only=read_only,
+            registered_dbs=registered_dbs,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+        )
+        return result.sql, result.explanation
