@@ -5,6 +5,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.v1.endpoints.query_stream import sse_event, _parse_db_ids
+import app.core.security.key_store as key_store
+import app.core.security.secret_store as secret_store
+from app.config import get_settings
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +228,7 @@ def sse_client_with_failing_executor():
     # Patch generate_with_config and schema_inspector at the module level
     gen_call_count = {"n": 0}
 
-    async def _fake_generate(prompt, provider=None, model=None, api_key=None):
+    async def _fake_generate(prompt, provider=None, model=None, api_key=None, ollama_url=None):
         gen_call_count["n"] += 1
         # Always return valid SQL
         return "```sql\nSELECT PetType FROM pets\n```"
@@ -272,4 +275,93 @@ def test_stream_emits_self_correct_event_on_exec_fail(sse_client_with_failing_ex
     result = result_events[0]
     assert result["data"]["metadata"]["self_correction_retries"] == 1, (
         f"Expected self_correction_retries=1, got {result['data']['metadata']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider resolution via stored settings
+# ---------------------------------------------------------------------------
+
+def _fresh(monkeypatch, tmp_path):
+    """Reset encryption / settings state to a clean tmp directory."""
+    monkeypatch.setenv("DB_ENCRYPTION_KEY", "")
+    get_settings.cache_clear()
+    monkeypatch.setattr(key_store, "KEY_FILE", tmp_path / ".encryption_key")
+    monkeypatch.setattr(secret_store, "SETTINGS_FILE", tmp_path / "settings.json")
+    key_store.reset_cipher_cache()
+
+
+def test_stream_resolves_provider_from_stored_settings(monkeypatch, tmp_path):
+    """Stream endpoint must pass the stored provider/api_key to generate_with_config
+    when the request carries only default (ollama) options.
+    """
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    from app.api.v1.endpoints import query_stream as qs_module
+    from app.config import Settings
+
+    # Persist a cloud provider key to the secret store
+    _fresh(monkeypatch, tmp_path)
+    secret_store.save_settings("openai", "gpt-4o-mini", "", api_key="sk-stored-stream")
+
+    app = FastAPI()
+    app.include_router(qs_module.router, prefix="/api/v1")
+
+    manager, _fake_conn = _make_db_manager()
+    validator = _make_validator()
+
+    captured = {}
+
+    async def _fake_generate(prompt, provider=None, model=None, api_key=None, ollama_url=None):
+        captured["provider"] = provider
+        captured["api_key"] = api_key
+        return "```sql\nSELECT 1\n```"
+
+    fake_settings = Settings(
+        SELF_CORRECTION_ENABLED=False,
+        OLLAMA_MODEL="test-model",
+    )
+
+    executor = MagicMock()
+    executor.execute = AsyncMock(return_value=([{"col": 1}], 1.0, None))
+
+    from app.dependencies import get_query_validator, get_query_executor
+    from app.core.database.connection_manager import get_db_manager as get_db_mgr
+
+    app.dependency_overrides[get_db_mgr] = lambda: manager
+    app.dependency_overrides[get_query_validator] = lambda: validator
+    app.dependency_overrides[get_query_executor] = lambda: executor
+    app.dependency_overrides[get_settings] = lambda: fake_settings
+
+    schema_inspector_mock = MagicMock()
+    schema_inspector_mock.get_relevant_schema_summary = AsyncMock(
+        return_value="CREATE TABLE t (id INT);"
+    )
+    schema_inspector_mock.get_schema_summary = AsyncMock(
+        return_value="CREATE TABLE t (id INT);"
+    )
+    intent_detector_mock = MagicMock()
+    intent_detector_mock.detect_intent.return_value = MagicMock(
+        intent=MagicMock(value="read"),
+        database_refs=[],
+        needs_decomposition=False,
+    )
+
+    with (
+        patch.object(qs_module, "generate_with_config", _fake_generate),
+        patch("app.api.v1.endpoints.query_stream.SchemaInspector", return_value=schema_inspector_mock),
+        patch("app.api.v1.endpoints.query_stream.get_intent_detector", return_value=intent_detector_mock),
+    ):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            events = collect_sse_events(
+                client,
+                "/api/v1/query/natural/stream?database_id=test",
+                {"question": "count rows", "options": {"execute": True, "read_only": True}},
+            )
+
+    assert captured.get("provider") == "openai", (
+        f"Expected resolved provider 'openai', got {captured.get('provider')!r}"
+    )
+    assert captured.get("api_key") == "sk-stored-stream", (
+        f"Expected resolved api_key 'sk-stored-stream', got {captured.get('api_key')!r}"
     )
