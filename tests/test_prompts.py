@@ -3,6 +3,7 @@
 import pytest
 from app.core.ai.prompts import (
     build_sql_generation_prompt,
+    build_sql_correction_prompt,
     extract_sql_from_response,
     extract_explanation_from_response,
     build_explanation,
@@ -203,3 +204,34 @@ class TestBuildExplanation:
     def test_question_in_output(self):
         result = build_explanation("my question", "SELECT 1;")
         assert "my question" in result
+
+
+# ---------------------------------------------------------------------------
+# build_sql_correction_prompt
+# ---------------------------------------------------------------------------
+
+class TestBuildSqlCorrectionPrompt:
+    def test_includes_failed_sql_and_error(self, sample_schema):
+        prompt = build_sql_correction_prompt(
+            question="How many pets?",
+            schema_context=sample_schema,
+            failed_sql="SELECT p.pet_type FROM pets p",
+            error_message="no such column: p.pet_type",
+            database_type="SQLite",
+        )
+        assert "SELECT p.pet_type FROM pets p" in prompt
+        assert "no such column: p.pet_type" in prompt
+        assert "How many pets?" in prompt
+
+    def test_seeds_sql_fence_for_extraction(self, sample_schema):
+        prompt = build_sql_correction_prompt(
+            "q", sample_schema, "SELECT 1", "boom", database_type="SQLite"
+        )
+        assert prompt.rstrip().endswith("```sql")
+
+    def test_read_only_mentions_select_only(self, sample_schema):
+        prompt = build_sql_correction_prompt(
+            "q", sample_schema, "SELECT 1", "boom", read_only=True
+        )
+        assert "SELECT" in prompt
+        assert sample_schema in prompt

@@ -110,6 +110,42 @@ The query will run on a database with the following schema:
 ```sql"""
 
 
+def build_sql_correction_prompt(
+    question: str,
+    schema_context: str,
+    failed_sql: str,
+    error_message: str,
+    database_type: str = "PostgreSQL",
+    read_only: bool = False,
+) -> str:
+    """Build a prompt that asks the model to fix SQL that failed at execution.
+
+    Seeds the response with ```sql so extract_sql_from_response parses the
+    output exactly like the generation prompt does.
+    """
+    constraint = "Only generate SELECT queries. " if read_only else ""
+    return f"""### Task
+The previous SQL query failed to execute. Fix it.
+
+### User Request
+{question}
+
+### Previous SQL (this failed)
+{failed_sql}
+
+### Database Error
+{error_message}
+
+### Rules
+Use {database_type} syntax. {constraint}Only use table and column names that exist in the schema below — never invent or guess names. A "no such column" or "no such table" error usually means a name is misspelled or has the wrong casing; find the correct name in the schema. Return SQL only. Do not include prose before the SQL.
+
+### Database Schema
+{schema_context}
+
+### SQL
+```sql"""
+
+
 def _parse_json_response(text: str) -> Optional[dict]:
     """Try to parse a JSON object from the response text."""
     text = text.strip()
