@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from app.core.database.retrieval.bm25 import _tokenize
+
 
 class ColumnVectorIndex(Protocol):
     """Minimal interface — VectorIndex (T6) will satisfy this."""
@@ -55,9 +57,11 @@ class ColumnPruner:
             cid: row for row, cid in enumerate(index.column_ids)
         }
 
+        q_tokens = set(_tokenize(question))
+
         result: list[dict] = []
         for table in selected_tables:
-            result.append(self._prune_table(table, q_vec, index, id_to_row))
+            result.append(self._prune_table(table, q_vec, index, id_to_row, q_tokens))
         return result
 
     # ------------------------------------------------------------------
@@ -70,6 +74,7 @@ class ColumnPruner:
         q_vec,
         index,
         id_to_row: dict[tuple[str, str], int],
+        q_tokens: set[str] | None = None,
     ) -> dict:
         columns: list[dict] = table.get("columns", [])
 
@@ -98,6 +103,14 @@ class ColumnPruner:
             for orig_idx, col in enumerate(columns)
             if col.get("is_pk") is True or col.get("is_fk") is True
         }
+
+        # Lexical keep: columns whose name tokens overlap the question tokens
+        if q_tokens:
+            mandatory |= {
+                orig_idx
+                for orig_idx, col in enumerate(columns)
+                if set(_tokenize(col["name"])) & q_tokens
+            }
 
         # Top-N by score to fill up to max_cols_per_table
         sorted_by_score = sorted(scored, key=lambda t: t[1], reverse=True)

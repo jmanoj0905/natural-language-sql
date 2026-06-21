@@ -404,3 +404,52 @@ class TestEdgeCases:
 
         assert len(big_result["columns"]) == 2
         assert len(small_result["columns"]) == 2  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# Lexical column keep (Task 7)
+# ---------------------------------------------------------------------------
+
+class TestLexicalColumnKeep:
+    def _make_low_score_index(self, columns: list[tuple[str, str]]) -> FakeIndex:
+        """Build an index where all column vectors are near-orthogonal to [1, 0].
+
+        All vecs point along dim-1 → dot product with q_vec=[1,0] ≈ 0.
+        """
+        n = len(columns)
+        # Each vec is [0.001, 1.0] normalised → score against [1,0] ≈ 0.001
+        raw = [[0.001, 1.0]] * n
+        return _make_index(columns, raw)
+
+    def test_lexical_column_is_kept_even_with_low_vector_score(self):
+        # Table has 20 columns; "release_year" scores ~0 on vectors but the question
+        # mentions "year", so it must survive pruning.
+        columns = [{"name": f"col{i}", "type": "TEXT"} for i in range(19)]
+        columns.append({"name": "release_year", "type": "INT"})
+        table = {"name": "movies", "columns": columns}
+
+        col_ids = [("movies", col["name"]) for col in columns]
+        low_score_index = self._make_low_score_index(col_ids)
+        # q_vec points along dim-0; all column vecs point along dim-1 → ~0 score
+        zero_query_vec = _unit([1.0, 0.0])
+
+        pruner = ColumnPruner(max_cols_per_table=5, col_score_threshold=0.9)
+        out = pruner.prune("movies by year", zero_query_vec, [table], low_score_index)
+        kept = {c["name"] for c in out[0]["columns"]}
+        assert "release_year" in kept
+
+    def test_non_matching_column_still_excluded_when_no_lexical_overlap(self):
+        """Column with no name overlap and low vector score is still pruned."""
+        columns = [{"name": f"col{i}", "type": "TEXT"} for i in range(19)]
+        columns.append({"name": "unrelated_field", "type": "INT"})
+        table = {"name": "movies", "columns": columns}
+
+        col_ids = [("movies", col["name"]) for col in columns]
+        low_score_index = self._make_low_score_index(col_ids)
+        zero_query_vec = _unit([1.0, 0.0])
+
+        pruner = ColumnPruner(max_cols_per_table=5, col_score_threshold=0.9)
+        out = pruner.prune("movies by year", zero_query_vec, [table], low_score_index)
+        kept = {c["name"] for c in out[0]["columns"]}
+        # "unrelated_field" has no token overlap with "movies by year"
+        assert "unrelated_field" not in kept
