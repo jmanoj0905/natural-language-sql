@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         False  # If True, strict validation. If False, trusts users who know SQL
     )
 
+    # Self-correction
+    SELF_CORRECTION_ENABLED: bool = True
+    SELF_CORRECTION_MAX_RETRIES: int = 2
+
     # Database Connection Defaults
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10

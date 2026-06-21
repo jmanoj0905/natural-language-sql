@@ -19,7 +19,9 @@ from app.core.ai.ollama_sql_generator import SQLGenerator
 from app.core.query.validator import QueryValidator
 from app.core.query.executor import QueryExecutor
 from app.dependencies import get_sql_generator, get_query_validator, get_query_executor
-from app.exceptions import NLSQLException
+from app.exceptions import NLSQLException, QueryExecutionError
+from app.core.ai.ollama_client import generate_with_config
+from app.core.query.self_correction import run_self_correction
 from app.utils.logger import get_logger
 from app.config import get_settings
 from app.api.v1.endpoints.query_management import add_to_history
@@ -80,7 +82,7 @@ async def natural_language_query(
         registered_dbs = db_manager.list_databases()
 
         async with db_manager.get_connection(target_db_id) as conn:
-            sql, explanation = await sql_generator.generate_sql(
+            gen = await sql_generator.generate(
                 question=request.question,
                 connection=conn,
                 db_id=target_db_id,
@@ -90,6 +92,7 @@ async def natural_language_query(
                 model=request.options.model,
                 api_key=request.options.api_key,
             )
+            sql, explanation = gen.sql, gen.explanation
 
             logger.info(
                 "sql_generated",
@@ -98,20 +101,71 @@ async def natural_language_query(
                 sql=sql[:200],
             )
 
-            validated_sql = validator.validate(sql)
+            pagination = None
+            if request.pagination:
+                pagination = {
+                    "offset": request.pagination.offset,
+                    "limit": request.pagination.limit,
+                }
 
+            self_correction_retries = 0
             execution_result = None
-            if request.options.execute:
-                pagination = None
-                if request.pagination:
-                    pagination = {
-                        "offset": request.pagination.offset,
-                        "limit": request.pagination.limit,
-                    }
 
-                results, exec_time, total_rows = await executor.execute(
-                    connection=conn, sql=validated_sql, pagination=pagination
-                )
+            if request.options.execute:
+                use_correction = settings.SELF_CORRECTION_ENABLED
+
+                async def _generate(prompt):
+                    return await generate_with_config(
+                        prompt,
+                        provider=request.options.provider,
+                        model=request.options.model,
+                        api_key=request.options.api_key,
+                    )
+
+                async def _execute(candidate_sql):
+                    # SAVEPOINT per attempt: a failed try rolls back to the
+                    # savepoint, leaving the outer engine.begin() transaction
+                    # usable for the next retry (PostgreSQL aborts otherwise).
+                    async with conn.begin_nested():
+                        return await executor.execute(
+                            connection=conn, sql=candidate_sql, pagination=pagination
+                        )
+
+                async def _schema_for_attempt(n):
+                    # Retry 2 widens to the full schema dump to recover columns
+                    # the RAG retriever may have pruned away.
+                    if n >= 2:
+                        return await sql_generator.schema_inspector.get_schema_summary(
+                            conn, db_id=target_db_id
+                        )
+                    return gen.schema_context
+
+                if use_correction:
+                    outcome = await run_self_correction(
+                        question=request.question,
+                        schema_context=gen.schema_context,
+                        database_type=gen.database_type,
+                        read_only=request.options.read_only,
+                        initial_sql=sql,
+                        generate=_generate,
+                        execute=_execute,
+                        transform=validator.validate,
+                        schema_for_attempt=_schema_for_attempt,
+                        max_retries=settings.SELF_CORRECTION_MAX_RETRIES,
+                    )
+                    self_correction_retries = outcome.retries
+                    if not outcome.succeeded:
+                        raise QueryExecutionError(
+                            outcome.error or "Query execution failed",
+                            details={"sql": outcome.sql[:200], "raw_error": outcome.error},
+                        )
+                    validated_sql = outcome.sql
+                    results, exec_time, total_rows = outcome.result
+                else:
+                    validated_sql = validator.validate(sql)
+                    results, exec_time, total_rows = await executor.execute(
+                        connection=conn, sql=validated_sql, pagination=pagination
+                    )
 
                 columns = list(results[0].keys()) if results else []
 
@@ -129,6 +183,8 @@ async def natural_language_query(
                     limit=request.pagination.limit if request.pagination else None,
                     has_more=has_more,
                 )
+            else:
+                validated_sql = validator.validate(sql)
 
         add_to_history(target_db_id, request.question)
 
@@ -145,6 +201,7 @@ async def natural_language_query(
                 "ai_provider": request.options.provider,
                 "timestamp": datetime.now().isoformat(),
                 "executed": request.options.execute,
+                "self_correction_retries": self_correction_retries,
             },
         )
 
