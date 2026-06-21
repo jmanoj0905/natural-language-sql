@@ -40,7 +40,7 @@ async def test_generate_returns_schema_context(monkeypatch):
     async def fake_schema(self, connection, question, db_id):
         return "CREATE TABLE users (id INT);"
 
-    async def fake_generate(prompt, provider, model, api_key):
+    async def fake_generate(prompt, provider, model, api_key, ollama_url=""):
         return "```sql\nSELECT * FROM users\n```"
 
     monkeypatch.setattr(
@@ -67,7 +67,7 @@ async def test_generate_sql_still_returns_tuple(monkeypatch):
     async def fake_schema(self, connection, question, db_id):
         return "CREATE TABLE users (id INT);"
 
-    async def fake_generate(prompt, provider, model, api_key):
+    async def fake_generate(prompt, provider, model, api_key, ollama_url=""):
         return "```sql\nSELECT 1\n```"
 
     monkeypatch.setattr(
