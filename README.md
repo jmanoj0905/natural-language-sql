@@ -32,7 +32,7 @@ Open **http://localhost:3000**.
 
 To pick a cloud provider (OpenAI, Gemini, Groq) instead of the local model, open the **Settings** panel in the app after it starts.
 
-> Privacy: everything runs in local containers. With the default Local/Ollama provider, no data leaves your machine. See [PRIVACY.md](PRIVACY.md) for the full statement.
+> Privacy: everything runs in local containers. With the default Local/Ollama provider, no data leaves your machine. (Note: with a cloud provider, your question and database schema are sent to that provider — see [PRIVACY.md](PRIVACY.md) for the full statement.)
 
 ---
 
@@ -351,7 +351,7 @@ Full endpoint table lives in `PROJECT_BLUEPRINT.html` §8.
 - **SELECT queries** get a default `LIMIT` when missing; oversized explicit `LIMIT` values are capped at `MAX_QUERY_RESULTS`.
 - **Strict validation** (`STRICT_SQL_VALIDATION=true`) blocks comments, hex literals, and other suspicious SQL patterns.
 - **Write operations** are allowed by default. The UI shows warning banners; use a read-only DB user for a hard block.
-- **Cloud provider API keys** are passed inline per request and **never stored or logged** server-side.
+- **Cloud provider API keys** are encrypted at rest (Fernet) in `~/.nlsql`, redacted from logs, and never returned in API responses (masked).
 - **CORS** defaults to `http://localhost:3000`. Set `CORS_ORIGINS` for production.
 - **Rate limiting** is configurable via `API_RATE_LIMIT_PER_MINUTE`.
 

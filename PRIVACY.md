@@ -49,6 +49,6 @@ This application does not collect, transmit, or aggregate usage data, error repo
 | Your question | Only when using a cloud provider, to that provider | No | No |
 | Generated SQL | Only when using a cloud provider, to that provider | No | No |
 | Database passwords | Never | Yes (Fernet) | No (redacted) |
-| Cloud API keys | Only to the selected cloud provider for inference | Yes (Fernet) | No (redacted) |
+| Cloud API keys | Used to authenticate to the selected provider; not part of the prompt payload | Yes (Fernet) | No (redacted) |
 | Query results (row data) | Never | No (in-memory only) | No |
 | Telemetry / analytics | Never | N/A | N/A |
