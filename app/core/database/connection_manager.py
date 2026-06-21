@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.models.database import DatabaseConfig
 from app.exceptions import DatabaseConnectionError, DatabaseConfigurationError
 from app.utils.logger import get_logger
+from app.core.security.key_store import get_cipher
 
 logger = get_logger(__name__)
 
@@ -38,47 +39,11 @@ class DatabaseConnectionManager:
         self._default_db_id: Optional[str] = None
         self.settings = get_settings()
 
-        # Initialize encryption key
-        self._cipher = self._get_or_create_cipher()
+        # Initialize encryption key (shared, persistent cipher)
+        self._cipher = get_cipher()
 
         # Load saved database configurations on startup
         self._load_saved_databases()
-
-    def _get_or_create_cipher(self) -> Fernet:
-        """
-        Get or create Fernet cipher for password encryption.
-
-        Returns:
-            Fernet cipher instance
-
-        Raises:
-            DatabaseConfigurationError: If encryption key is invalid
-        """
-        settings = get_settings()
-        encryption_key = settings.DB_ENCRYPTION_KEY
-
-        if not encryption_key:
-            # Generate a new key and warn the user
-            encryption_key = Fernet.generate_key().decode()
-            logger.warning(
-                "no_encryption_key_configured",
-                message="DB_ENCRYPTION_KEY not set in environment. Generated temporary key. "
-                "Set DB_ENCRYPTION_KEY in .env for persistent encryption across restarts.",
-                generated_key=encryption_key
-            )
-
-        try:
-            # Ensure the key is bytes
-            if isinstance(encryption_key, str):
-                encryption_key = encryption_key.encode()
-
-            return Fernet(encryption_key)
-        except Exception as e:
-            logger.error("invalid_encryption_key", error=str(e))
-            raise DatabaseConfigurationError(
-                f"Invalid DB_ENCRYPTION_KEY: {str(e)}. "
-                "Generate a valid key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-            )
 
     def _encrypt_password(self, password: str) -> str:
         """
