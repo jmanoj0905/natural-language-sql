@@ -33,6 +33,7 @@ from app.dependencies import get_query_validator, get_query_executor
 from app.exceptions import NLSQLException
 from app.config import get_settings
 from app.utils.logger import get_logger
+from app.core.query.self_correction import self_correct_sql
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
@@ -240,12 +241,68 @@ async def natural_language_query_stream(
                     elapsed = round((time.perf_counter() - t0) * 1000)
                     yield sse_event("progress", {"stage": "validate", "status": "completed", "duration_ms": elapsed})
 
-                    # --- Stage 5: Execute ---
+                    # --- Stage 5: Execute (with live self-correction) ---
                     execution_result = None
+                    self_correction_retries = 0
                     if request.options.execute:
                         yield sse_event("progress", {"stage": "execute", "status": "in_progress"})
                         t0 = time.perf_counter()
-                        results, exec_time, _ = await executor.execute(connection=conn, sql=validated_sql)
+
+                        async def _generate(prompt):
+                            return await generate_with_config(
+                                prompt,
+                                provider=request.options.provider,
+                                model=request.options.model,
+                                api_key=request.options.api_key,
+                            )
+
+                        async def _execute(candidate_sql):
+                            # SAVEPOINT per attempt so a failed try doesn't abort
+                            # the outer engine.begin() transaction on PostgreSQL.
+                            async with conn.begin_nested():
+                                return await executor.execute(connection=conn, sql=candidate_sql)
+
+                        async def _schema_for_attempt(n):
+                            if n >= 2:
+                                return await schema_inspector.get_schema_summary(conn, db_id=target_db_id)
+                            return schema_context
+
+                        if settings.SELF_CORRECTION_ENABLED:
+                            outcome = None
+                            async for ev in self_correct_sql(
+                                question=request.question,
+                                schema_context=schema_context,
+                                database_type=database_type,
+                                read_only=request.options.read_only,
+                                initial_sql=validated_sql,
+                                generate=_generate,
+                                execute=_execute,
+                                transform=validator.validate,
+                                schema_for_attempt=_schema_for_attempt,
+                                max_retries=settings.SELF_CORRECTION_MAX_RETRIES,
+                            ):
+                                if ev.kind == "retry":
+                                    yield sse_event("progress", {
+                                        "stage": "self_correct",
+                                        "status": "in_progress",
+                                        "attempt": ev.attempt,
+                                        "message": f"Retrying after error: {ev.error[:120]}",
+                                    })
+                                else:  # kind == "done"
+                                    outcome = ev.outcome
+                            self_correction_retries = outcome.retries
+                            if not outcome.succeeded:
+                                yield sse_event("error", {
+                                    "stage": "execute",
+                                    "error": outcome.error or "Query execution failed",
+                                    "code": "QUERY_EXECUTION_ERROR",
+                                })
+                                return
+                            validated_sql = outcome.sql
+                            results, exec_time, _ = outcome.result
+                        else:
+                            results, exec_time, _ = await executor.execute(connection=conn, sql=validated_sql)
+
                         columns = list(results[0].keys()) if results else []
                         execution_result = ExecutionResult(
                             rows=results, row_count=len(results),
@@ -269,6 +326,7 @@ async def natural_language_query_stream(
                             "ai_provider": request.options.provider,
                             "timestamp": datetime.now().isoformat(),
                             "executed": request.options.execute,
+                            "self_correction_retries": self_correction_retries,
                         },
                     )
                     yield sse_event("result", query_response.model_dump(mode="json"))
