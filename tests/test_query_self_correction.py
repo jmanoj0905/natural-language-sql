@@ -100,7 +100,7 @@ class _FakeExecutor:
 def test_self_correction_recovers_exec_fail(monkeypatch):
     executor = _FakeExecutor()
 
-    async def fake_generate(prompt, provider, model, api_key):
+    async def fake_generate(prompt, provider, model, api_key, ollama_url=""):
         return "```sql\nSELECT PetType FROM pets\n```"
 
     monkeypatch.setattr(

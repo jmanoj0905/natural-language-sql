@@ -34,6 +34,7 @@ from app.exceptions import NLSQLException
 from app.config import get_settings
 from app.utils.logger import get_logger
 from app.core.query.self_correction import self_correct_sql
+from app.core.security.provider_resolver import resolve_provider_config
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
@@ -150,6 +151,10 @@ async def natural_language_query_stream(
 
     multi_db = len(ids) > 1
 
+    # Resolve effective provider/model/api_key/ollama_url once for this request.
+    # Precedence: explicit non-default request values win; stored settings fill in.
+    _provider, _model, _api_key, _ollama_url = resolve_provider_config(request.options)
+
     # ---- Single-DB fast path ----
     if not multi_db:
 
@@ -191,7 +196,7 @@ async def natural_language_query_stream(
                     yield sse_event("progress", {"stage": "schema", "status": "completed", "duration_ms": elapsed, "message": schema_msg})
 
                     # --- Stage 3: AI Generate ---
-                    _provider_label = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq"}.get(request.options.provider, "Ollama")
+                    _provider_label = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq"}.get(_provider, "Ollama")
                     yield sse_event("progress", {"stage": "ai", "status": "in_progress", "message": f"Waiting for {_provider_label}..."})
                     t0 = time.perf_counter()
 
@@ -217,11 +222,12 @@ async def natural_language_query_stream(
                     )
                     response_text = await generate_with_config(
                         prompt,
-                        provider=request.options.provider,
-                        model=request.options.model,
-                        api_key=request.options.api_key,
+                        provider=_provider,
+                        model=_model,
+                        api_key=_api_key,
+                        ollama_url=_ollama_url,
                     )
-                    logger.debug("ai_raw_response", provider=request.options.provider, response=response_text)
+                    logger.debug("ai_raw_response", provider=_provider, response=response_text)
                     sql = extract_sql_from_response(response_text)
                     explanation = extract_explanation_from_response(response_text)
                     if not explanation and sql:
@@ -252,9 +258,10 @@ async def natural_language_query_stream(
                         async def _generate(prompt):
                             return await generate_with_config(
                                 prompt,
-                                provider=request.options.provider,
-                                model=request.options.model,
-                                api_key=request.options.api_key,
+                                provider=_provider,
+                                model=_model,
+                                api_key=_api_key,
+                                ollama_url=_ollama_url,
                             )
 
                         async def _execute(candidate_sql):
@@ -323,8 +330,8 @@ async def natural_language_query_stream(
                         metadata={
                             "database_id": target_db_id,
                             "database_nickname": db_config.nickname,
-                            "ai_model": request.options.model or settings.OLLAMA_MODEL,
-                            "ai_provider": request.options.provider,
+                            "ai_model": _model or settings.OLLAMA_MODEL,
+                            "ai_provider": _provider,
                             "timestamp": datetime.now().isoformat(),
                             "executed": request.options.execute,
                             "self_correction_retries": self_correction_retries,
@@ -394,7 +401,7 @@ async def natural_language_query_stream(
             yield sse_event("progress", {"stage": "schema", "status": "completed", "duration_ms": elapsed, "message": schema_msg})
 
             # --- Stage 3: AI Generate (once) ---
-            _provider_label = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq"}.get(request.options.provider, "Ollama")
+            _provider_label = {"openai": "OpenAI", "google": "Gemini", "groq": "Groq"}.get(_provider, "Ollama")
             yield sse_event("progress", {"stage": "ai", "status": "in_progress", "message": f"Waiting for {_provider_label}..."})
             t0 = time.perf_counter()
 
@@ -420,11 +427,12 @@ async def natural_language_query_stream(
             )
             response_text = await generate_with_config(
                 prompt,
-                provider=request.options.provider,
-                model=request.options.model,
-                api_key=request.options.api_key,
+                provider=_provider,
+                model=_model,
+                api_key=_api_key,
+                ollama_url=_ollama_url,
             )
-            logger.debug("ai_raw_response", provider=request.options.provider, response=response_text)
+            logger.debug("ai_raw_response", provider=_provider, response=response_text)
             sql = extract_sql_from_response(response_text)
             explanation = extract_explanation_from_response(response_text)
             if not explanation and sql:
@@ -499,8 +507,8 @@ async def natural_language_query_stream(
                     "database_ids": ids,
                     "database_nicknames": [nicknames[i] for i in ids],
                     "multi_db": True,
-                    "ai_model": request.options.model or settings.OLLAMA_MODEL,
-                    "ai_provider": request.options.provider,
+                    "ai_model": _model or settings.OLLAMA_MODEL,
+                    "ai_provider": _provider,
                     "timestamp": datetime.now().isoformat(),
                     "executed": request.options.execute,
                 },

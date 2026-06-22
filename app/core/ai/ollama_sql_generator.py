@@ -47,6 +47,7 @@ class SQLGenerator:
         provider: str = "ollama",
         model: str = "",
         api_key: str = "",
+        ollama_url: str = "",
     ) -> SQLGenerationResult:
         """
         Generate SQL from natural language using Ollama.
@@ -60,6 +61,7 @@ class SQLGenerator:
             provider: AI provider to use for generation
             model: Optional provider-specific model override
             api_key: Optional API key for external providers
+            ollama_url: Optional custom Ollama base URL
 
         Returns:
             SQLGenerationResult with sql, explanation, schema_context, database_type
@@ -116,6 +118,7 @@ class SQLGenerator:
                 provider=provider,
                 model=model,
                 api_key=api_key,
+                ollama_url=ollama_url,
             )
 
             log_ai_request(
@@ -177,6 +180,7 @@ class SQLGenerator:
         provider: str = "ollama",
         model: str = "",
         api_key: str = "",
+        ollama_url: str = "",
     ) -> Tuple[str, str]:
         """Backward-compatible wrapper returning (sql, explanation)."""
         result = await self.generate(
@@ -188,5 +192,6 @@ class SQLGenerator:
             provider=provider,
             model=model,
             api_key=api_key,
+            ollama_url=ollama_url,
         )
         return result.sql, result.explanation

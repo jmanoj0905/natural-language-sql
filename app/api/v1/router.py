@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     schema,
     database,
     query_management,
+    settings,
 )
 
 # Create API v1 router
@@ -21,3 +22,4 @@ api_router.include_router(query_stream.router)
 api_router.include_router(query_management.router)
 api_router.include_router(schema.router)
 api_router.include_router(database.router)
+api_router.include_router(settings.router)

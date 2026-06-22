@@ -10,6 +10,19 @@ from structlog.types import FilteringBoundLogger
 from app.config import get_settings
 
 
+_SENSITIVE_KEYS = {
+    "api_key", "password", "authorization", "generated_key", "encryption_key",
+}
+
+
+def redact_sensitive(logger, method_name, event_dict):
+    """structlog processor: mask sensitive fields before rendering."""
+    for key in list(event_dict.keys()):
+        if key.lower() in _SENSITIVE_KEYS and event_dict[key]:
+            event_dict[key] = "***REDACTED***"
+    return event_dict
+
+
 def configure_logging() -> FilteringBoundLogger:
     """
     Configure structured logging with structlog.
@@ -36,6 +49,7 @@ def configure_logging() -> FilteringBoundLogger:
     # Determine processors based on format
     if settings.LOG_FORMAT == "json":
         processors = [
+            redact_sensitive,
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,
@@ -48,6 +62,7 @@ def configure_logging() -> FilteringBoundLogger:
     else:
         # Console-friendly format for development
         processors = [
+            redact_sensitive,
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,

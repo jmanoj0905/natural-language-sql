@@ -122,7 +122,6 @@ export default function QueryInterface({
             read_only: false,
             provider: modelConfig.provider,
             model: modelConfig.model,
-            api_key: modelConfig.apiKey,
           },
         }),
         signal: controller.signal,

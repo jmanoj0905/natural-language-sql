@@ -25,6 +25,7 @@ from app.core.query.self_correction import run_self_correction
 from app.utils.logger import get_logger
 from app.config import get_settings
 from app.api.v1.endpoints.query_management import add_to_history
+from app.core.security.provider_resolver import resolve_provider_config
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
@@ -80,6 +81,7 @@ async def natural_language_query(
     try:
         db_config = db_manager.get_database_config(target_db_id)
         registered_dbs = db_manager.list_databases()
+        provider, model, api_key, ollama_url = resolve_provider_config(request.options)
 
         async with db_manager.get_connection(target_db_id) as conn:
             gen = await sql_generator.generate(
@@ -88,9 +90,10 @@ async def natural_language_query(
                 db_id=target_db_id,
                 read_only=request.options.read_only,
                 registered_dbs=registered_dbs,
-                provider=request.options.provider,
-                model=request.options.model,
-                api_key=request.options.api_key,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                ollama_url=ollama_url,
             )
             sql, explanation = gen.sql, gen.explanation
 
@@ -117,9 +120,10 @@ async def natural_language_query(
                 async def _generate(prompt):
                     return await generate_with_config(
                         prompt,
-                        provider=request.options.provider,
-                        model=request.options.model,
-                        api_key=request.options.api_key,
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        ollama_url=ollama_url,
                     )
 
                 async def _execute(candidate_sql):
@@ -197,8 +201,8 @@ async def natural_language_query(
             metadata={
                 "database_id": target_db_id,
                 "database_nickname": db_config.nickname,
-                "ai_model": request.options.model or settings.OLLAMA_MODEL,
-                "ai_provider": request.options.provider,
+                "ai_model": model or settings.OLLAMA_MODEL,
+                "ai_provider": provider,
                 "timestamp": datetime.now().isoformat(),
                 "executed": request.options.execute,
                 "self_correction_retries": self_correction_retries,

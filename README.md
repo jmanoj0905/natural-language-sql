@@ -9,6 +9,33 @@
 
 ---
 
+## Download & Run
+
+**Requires:** [Docker](https://www.docker.com/get-started) 20.10+ with Compose v2 · ~10 GB free disk · no Python/Node/Ollama needed.
+
+**One-liner (macOS / Linux):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/quickstart.sh | sh
+```
+
+**Or manually:**
+
+```bash
+curl -O https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/docker-compose.yml
+docker compose up -d
+```
+
+Open **http://localhost:3000**.
+
+> **First run:** the Ollama model (~5 GB) downloads in the background. SQL generation becomes available once the download finishes. Watch progress with `docker compose logs -f ollama-pull`.
+
+To pick a cloud provider (OpenAI, Gemini, Groq) instead of the local model, open the **Settings** panel in the app after it starts.
+
+> Privacy: everything runs in local containers. With the default Local/Ollama provider, no data leaves your machine. (Note: with a cloud provider, your question and database schema are sent to that provider — see [PRIVACY.md](PRIVACY.md) for the full statement.)
+
+---
+
 ## What it does
 
 Type a question like *"show me the top 10 customers by revenue last month"* — the engine retrieves only the relevant slice of your schema, asks a local SQL-tuned LLM to write the query, validates it, executes it, and streams the results back in real time. No SQL knowledge required.
@@ -57,6 +84,11 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 Prebuilt multi-arch images on GHCR. No Python/Node/Ollama install needed — just Docker.
 
 ```bash
+# Quickstart script (checks prerequisites, downloads compose file, starts stack)
+curl -fsSL https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/quickstart.sh | sh
+
+# — or manually —
+
 # 1. Grab the compose file
 curl -O https://raw.githubusercontent.com/jmanoj0905/natural-language-sql/main/docker-compose.yml
 
@@ -314,12 +346,12 @@ Full endpoint table lives in `PROJECT_BLUEPRINT.html` §8.
 
 ## Security Notes
 
-- **Credentials** are Fernet-encrypted at rest in `~/.nlsql/databases.json`. **Generate a stable key and set `DB_ENCRYPTION_KEY` in `.env`** — otherwise a fresh key is generated on each restart, making saved passwords unrecoverable.
+- **Credentials** are Fernet-encrypted at rest in `~/.nlsql/databases.json`. When `DB_ENCRYPTION_KEY` is blank, a key is auto-generated and persisted to `~/.nlsql/.encryption_key` (in the `nlsql_data` volume), so saved passwords survive restarts. **Set `DB_ENCRYPTION_KEY` explicitly in `.env`** to override with an operator-managed key.
 - **SQL execution** is limited to single SELECT / INSERT / UPDATE / DELETE statements, with one supported compound shape: write statement followed by SELECT.
 - **SELECT queries** get a default `LIMIT` when missing; oversized explicit `LIMIT` values are capped at `MAX_QUERY_RESULTS`.
 - **Strict validation** (`STRICT_SQL_VALIDATION=true`) blocks comments, hex literals, and other suspicious SQL patterns.
 - **Write operations** are allowed by default. The UI shows warning banners; use a read-only DB user for a hard block.
-- **Cloud provider API keys** are passed inline per request and **never stored or logged** server-side.
+- **Cloud provider API keys** are encrypted at rest (Fernet) in `~/.nlsql`, redacted from logs, and never returned in API responses (masked).
 - **CORS** defaults to `http://localhost:3000`. Set `CORS_ORIGINS` for production.
 - **Rate limiting** is configurable via `API_RATE_LIMIT_PER_MINUTE`.
 

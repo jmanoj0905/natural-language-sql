@@ -6,6 +6,7 @@ import ResultsDisplay from './components/ResultsDisplay'
 import QueryHistory from './components/QueryHistory'
 import DatabaseStatus from './components/DatabaseStatus'
 import SettingsModal from './components/SettingsModal'
+import SetupGate from './components/SetupGate'
 import { useToast } from './hooks/useToast.jsx'
 import { API_BASE } from './config'
 
@@ -18,7 +19,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('query')
   const [aiMode, setAiMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [modelConfig, setModelConfig] = useState({ provider: 'ollama', model: '', apiKey: '' })
+  const [modelConfig, setModelConfig] = useState({ provider: 'ollama', model: '', apiKey: '', ollamaUrl: '' })
 
   useEffect(() => {
     document.body.classList.add('cursor-active')
@@ -94,6 +95,15 @@ function App() {
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    axios.get(`${API_BASE}/settings`)
+      .then(res => {
+        const { provider, model, ollama_url } = res.data
+        setModelConfig({ provider, model, apiKey: '', ollamaUrl: ollama_url || '' })
+      })
+      .catch(err => console.error('Failed to load settings:', err))
+  }, [])
+
   const loadDatabases = async () => {
     try {
       const resp = await axios.get(`${API_BASE}/databases`)
@@ -133,6 +143,7 @@ function App() {
     }`
 
   return (
+    <SetupGate provider={modelConfig.provider}>
     <div className="bg-background text-foreground min-h-screen">
       {/* Top Nav Bar */}
       <header className="flex justify-between items-center w-full px-6 h-16 sticky top-0 z-50 bg-white border-b-2 border-border">
@@ -205,7 +216,7 @@ function App() {
             )}
 
             <footer className="flex justify-between items-center font-mono text-[10px] uppercase opacity-50 pb-12 text-foreground">
-              <div>ENGINE: {modelConfig.provider.toUpperCase()} | MODEL: {(modelConfig.model || 'AUTO').toUpperCase()}</div>
+              <div>ENGINE: {modelConfig.provider.toUpperCase()} | MODEL: {(modelConfig.model || 'AUTO').toUpperCase()} · {modelConfig.provider === 'ollama' ? 'LOCAL' : 'CLOUD↗'}</div>
               <div>&copy; {new Date().getFullYear()} NLSQL SYSTEM</div>
             </footer>
           </div>
@@ -221,6 +232,7 @@ function App() {
         />
       )}
     </div>
+    </SetupGate>
   )
 }
 

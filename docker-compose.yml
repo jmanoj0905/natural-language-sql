@@ -45,6 +45,11 @@ services:
       MAX_QUERY_RESULTS: ${MAX_QUERY_RESULTS:-1000}
       DEFAULT_QUERY_LIMIT: ${DEFAULT_QUERY_LIMIT:-100}
       QUERY_TIMEOUT_SECONDS: ${QUERY_TIMEOUT_SECONDS:-30}
+      # OPTIONAL: Fernet key for encrypting stored database passwords.
+      # When left blank the backend auto-generates a key on first run and
+      # persists it to ~/.nlsql/.encryption_key inside the nlsql_data volume,
+      # so passwords survive container restarts without any operator action.
+      # Only set this if you want to supply your own key (e.g. for key rotation).
       DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:-}
       STRICT_SQL_VALIDATION: ${STRICT_SQL_VALIDATION:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost"]}
