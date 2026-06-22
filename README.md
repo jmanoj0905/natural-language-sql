@@ -50,7 +50,8 @@ Type a question like *"show me the top 10 customers by revenue last month"* — 
 
 ## Features
 
-- **Local AI by default** — Ollama runs on your machine. OpenAI, Gemini, and Groq are opt-in per request from Settings; keys never persist on the server.
+- **Local AI by default** — Ollama runs on your machine. OpenAI, Gemini, and Groq are opt-in from Settings; your provider choice and API key persist locally in `~/.nlsql` (key Fernet-encrypted), never in logs or API responses.
+- **Persistent provider settings** — Choose Ollama or a cloud provider once in Settings; the choice and encrypted key are saved to `~/.nlsql/settings.json`. Point at a custom Ollama endpoint (e.g. `http://host.docker.internal:11434`). A privacy indicator shows whether data stays local or is sent to a cloud provider, and a first-run gate waits while the local model downloads.
 - **Hybrid schema retrieval (RAG)** — BM25 + sentence-transformer vectors fused with Reciprocal Rank Fusion, then expanded along foreign keys and column-pruned by cosine similarity. The model only ever sees the slice of the schema your question actually needs.
 - **PostgreSQL & MySQL** — Connect multiple databases simultaneously, switch between them in one click.
 - **Multi-DB fan-out** — Generate one SQL statement, execute it against several same-type databases in parallel, merge rows with a `__source_db__` column.
@@ -108,7 +109,7 @@ Open **http://localhost:3000**. First model pull is the slow part; subsequent st
 OLLAMA_MODEL=sqlcoder docker compose up -d
 ```
 
-**Persistent encryption key** (so saved DB configs survive a `docker compose down`):
+**Encryption key:** auto-generated on first run and persisted to `~/.nlsql/.encryption_key` inside the `nlsql_data` volume, so saved DB configs and cloud keys survive `docker compose down`. To pin an operator-managed key instead (e.g. to share across hosts), set it explicitly:
 ```bash
 echo "DB_ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
 ```
@@ -278,7 +279,7 @@ ollama pull <model-name>
 | `llama3.2:3b` | ~2GB | Faster, less accurate |
 | `codellama:7b` | ~3.8GB | General code model |
 
-Cloud providers (OpenAI, Google Gemini, Groq, HuggingFace) are configured per-request via the Settings modal — their API keys ride with the request and are never stored.
+Cloud providers (OpenAI, Google Gemini, Groq) are configured in the Settings modal. The selected provider and its API key are saved locally — the key is Fernet-encrypted in `~/.nlsql/settings.json`, redacted from logs, and never returned in API responses (masked). See [PRIVACY.md](PRIVACY.md).
 
 ---
 
